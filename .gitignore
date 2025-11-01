@@ -1,0 +1,22 @@
+# Node modules
+node_modules/
+dist/
+out/
+
+# VS Code
+.vscode-test/
+*.vsix
+
+# Logs
+*.log
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Environment
+.env
+.env.local
+
+# Build artifacts
+*.tsbuildinfo
