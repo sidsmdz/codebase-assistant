@@ -1,0 +1,115 @@
+=========================================
+CODEBASE ASSISTANT - PROJECT REPORT
+Generated: Fri Oct 31 22:21:23 PDT 2025
+=========================================
+
+## 1. REPOSITORY INFO
+---
+{"createdAt":"2025-11-01T05:01:45Z","description":"AI-powered code generation assistant for VS Code","name":"codebase-assistant","updatedAt":"2025-11-01T05:04:43Z","url":"https://github.com/sidsmdz/codebase-assistant","visibility":"PRIVATE"}
+
+## 2. LABELS
+---
+bug	Something isn't working	#d73a4a
+documentation	Improvements or additions to documentation	#0075ca
+duplicate	This issue or pull request already exists	#cfd3d7
+enhancement	New feature or request	#a2eeef
+good first issue	Good for newcomers	#7057ff
+help wanted	Extra attention is needed	#008672
+invalid	This doesn't seem right	#e4e669
+question	Further information is requested	#d876e3
+wontfix	This will not be worked on	#ffffff
+epic-1	Minimal Viable Extension	#0052CC
+epic-2	Knowledge Base & Search	#0052CC
+epic-3	Context Enhancement & Learning	#0052CC
+epic-4	Verification Project	#0052CC
+epic-5	Integration & Polish	#0052CC
+story	User story	#0E8A16
+spike	Research spike	#FBCA04
+epic	Epic tracking issue	#3E4B9E
+in-progress	Currently being worked on	#FFA500
+blocked	Blocked by dependency	#B60205
+priority-high	High priority	#D93F0B
+ready-for-review	Ready for code review	#1D76DB
+priority-medium	Medium priority	#FBCA04
+priority-low	Low priority	#0E8A16
+size-1	1 story point	#C2E0C6
+size-2	2 story points	#C2E0C6
+size-3	3 story points	#C2E0C6
+size-5	5 story points	#BFDADC
+size-8	8 story points	#BFDADC
+
+## 3. MILESTONES
+---
+[1] Sprint 1: Minimal Viable Extension - Due: 2025-11-14T08:00:00Z - Open: 5/5
+[2] Sprint 2: Knowledge Base & Search - Due: 2025-11-28T08:00:00Z - Open: 1/1
+[3] Sprint 3: Context & Learning - Due: 2025-12-12T08:00:00Z - Open: 1/1
+[4] Sprint 4: Verification Project - Due: 2025-12-19T08:00:00Z - Open: 1/1
+[5] Sprint 5: Integration & Launch - Due: 2025-12-26T08:00:00Z - Open: 1/1
+
+## 4. ISSUES (ALL)
+---
+9	OPEN	Story 1.4: Air-Gapped Packaging	epic-1, story, priority-high, size-2	2025-11-01T05:06:56Z
+8	OPEN	Story 1.3: Call Copilot Programmatically	epic-1, story, priority-high, size-3	2025-11-01T05:06:50Z
+7	OPEN	Story 1.2: Register Chat Participant	epic-1, story, priority-high, size-3	2025-11-01T05:06:43Z
+6	OPEN	Story 1.1: Extension Scaffolding	epic-1, story, in-progress, priority-high, size-2	2025-11-01T05:16:16Z
+5	OPEN	[EPIC 5] Integration & Polish	epic-5, epic, priority-medium	2025-11-01T05:06:18Z
+4	OPEN	[EPIC 4] Verification Project	epic-4, epic, priority-high	2025-11-01T05:06:10Z
+3	OPEN	[EPIC 3] Context Enhancement & Learning	epic-3, epic, priority-high	2025-11-01T05:06:02Z
+2	OPEN	[EPIC 2] Knowledge Base & Search	epic-2, epic, priority-high	2025-11-01T05:05:54Z
+1	OPEN	[EPIC 1] Minimal Viable Extension	epic-1, epic, priority-high	2025-11-01T05:05:44Z
+
+## 5. ISSUES BY EPIC
+---
+### Epic 1 Issues:
+9	OPEN	Story 1.4: Air-Gapped Packaging	epic-1, story, priority-high, size-2	2025-11-01T05:06:56Z
+8	OPEN	Story 1.3: Call Copilot Programmatically	epic-1, story, priority-high, size-3	2025-11-01T05:06:50Z
+7	OPEN	Story 1.2: Register Chat Participant	epic-1, story, priority-high, size-3	2025-11-01T05:06:43Z
+6	OPEN	Story 1.1: Extension Scaffolding	epic-1, story, in-progress, priority-high, size-2	2025-11-01T05:16:16Z
+1	OPEN	[EPIC 1] Minimal Viable Extension	epic-1, epic, priority-high	2025-11-01T05:05:44Z
+
+### Epic 2 Issues:
+2	OPEN	[EPIC 2] Knowledge Base & Search	epic-2, epic, priority-high	2025-11-01T05:05:54Z
+
+### Epic 3 Issues:
+3	OPEN	[EPIC 3] Context Enhancement & Learning	epic-3, epic, priority-high	2025-11-01T05:06:02Z
+
+### Epic 4 Issues:
+4	OPEN	[EPIC 4] Verification Project	epic-4, epic, priority-high	2025-11-01T05:06:10Z
+
+### Epic 5 Issues:
+5	OPEN	[EPIC 5] Integration & Polish	epic-5, epic, priority-medium	2025-11-01T05:06:18Z
+
+## 6. COMMITS
+---
+de380c7 Add issue templates
+3fdc6e3 Initial project structure
+
+## 7. BRANCHES
+---
+  master
+* story-1.1-scaffolding
+  remotes/origin/master
+
+## 8. FILE STRUCTURE
+---
+Command 'tree' not found, but can be installed with:
+sudo snap install tree  # version 2.1.3+pkg-5852, or
+sudo apt  install tree  # version 2.1.1-2
+See 'snap info tree' for additional versions.
+.
+./docs
+./src
+./tests
+./verification-project
+
+## 9. PROJECT STATISTICS
+---
+Total Issues: 9
+Open Issues: 9
+Closed Issues: 0
+Total Labels: 28
+Total Milestones: 5
+
+=========================================
+END OF REPORT
+=========================================
