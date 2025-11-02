@@ -1,64 +1,18 @@
 import * as vscode from 'vscode';
+import { ChatViewProvider } from './chatViewProvider';
 
-/**
- * Extension activation entry point
- * Called when extension is activated (on VS Code startup)
- */
 export function activate(context: vscode.ExtensionContext) {
-    console.log('🚀 Codebase Assistant is now active!');
+    const provider = new ChatViewProvider(context.extensionUri);
 
-    // Register a simple command (for testing)
-    const helloCommand = vscode.commands.registerCommand(
-        'codebase-assistant.helloWorld',
-        () => {
-            vscode.window.showInformationMessage(
-                '👋 Hello from Codebase Assistant!'
-            );
-        }
+    context.subscriptions.push(
+        vscode.window.registerWebviewViewProvider('opencat.chatView', provider)
     );
 
-    // Register the chat participant
-    const chatParticipant = vscode.chat.createChatParticipant(
-        'codebase',
-        handleChatRequest
+    context.subscriptions.push(
+        vscode.commands.registerCommand('opencat.openChat', () => {
+            vscode.commands.executeCommand('opencat.chatView.focus');
+        })
     );
-
-    // Set participant metadata
-    chatParticipant.iconPath = vscode.Uri.joinPath(
-        context.extensionUri,
-        'resources',
-        'icon.png'
-    );
-
-    // Add to subscriptions for cleanup
-    context.subscriptions.push(helloCommand, chatParticipant);
-
-    console.log('✅ Codebase Assistant registered successfully');
 }
 
-/**
- * Chat request handler
- * This is called every time user sends a message to @codebase
- */
-async function handleChatRequest(
-    request: vscode.ChatRequest,
-    context: vscode.ChatContext,
-    stream: vscode.ChatResponseStream,
-    token: vscode.CancellationToken
-): Promise<vscode.ChatResult> {
-    
-    // For now, just echo the message back
-    stream.markdown(`**Echo:** ${request.prompt}\n\n`);
-    stream.markdown(`I received your message! 🎉\n\n`);
-    stream.markdown(`_(This is Story 1.1 - basic scaffolding)_`);
-
-    return { metadata: { command: 'echo' } };
-}
-
-/**
- * Extension deactivation
- * Called when extension is deactivated
- */
-export function deactivate() {
-    console.log('👋 Codebase Assistant deactivated');
-}
+export function deactivate() {}
