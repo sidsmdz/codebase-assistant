@@ -1,8 +1,18 @@
 import * as vscode from 'vscode';
 import { ChatViewProvider } from './chatViewProvider';
+import { KnowledgeBaseManager } from './knowledgeBase/KnowledgeBaseManager';
 
-export function activate(context: vscode.ExtensionContext) {
-    const provider = new ChatViewProvider(context.extensionUri);
+let kbManager: KnowledgeBaseManager;
+
+export async function activate(context: vscode.ExtensionContext) {
+    console.log('OpenCat extension activating...');
+
+    // Initialize Knowledge Base
+    kbManager = new KnowledgeBaseManager(context);
+    await kbManager.initialize();
+
+    // Chat view provider
+    const provider = new ChatViewProvider(context.extensionUri, kbManager);
 
     context.subscriptions.push(
         vscode.window.registerWebviewViewProvider('opencat.chatView', provider)
@@ -13,6 +23,25 @@ export function activate(context: vscode.ExtensionContext) {
             vscode.commands.executeCommand('opencat.chatView.focus');
         })
     );
+
+    // KB Stats command
+    context.subscriptions.push(
+        vscode.commands.registerCommand('opencat.showKBStats', async () => {
+            const stats = await kbManager.getStats();
+            vscode.window.showInformationMessage(
+                `OpenCat Knowledge Base\n` +
+                `Files: ${stats.fileCount}\n` +
+                `Size: ${(stats.totalSize / 1024).toFixed(2)} KB\n` +
+                `Path: ${stats.path}`
+            );
+        })
+    );
+
+    console.log('OpenCat activated successfully');
 }
 
 export function deactivate() {}
+
+export function getKBManager(): KnowledgeBaseManager {
+    return kbManager;
+}

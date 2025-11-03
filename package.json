@@ -31,12 +31,16 @@
     ]
   },
   "commands": [
-    {
-      "command": "opencat.openChat",
-      "title": "OpenCat: Open Chat",
-      "icon": "$(comment-discussion)"
-    }
-  ]
+      {
+        "command": "opencat.openChat",
+        "title": "OpenCat: Open Chat",
+        "icon": "$(comment-discussion)"
+      },
+      {
+        "command": "opencat.showKBStats",
+        "title": "OpenCat: Show Knowledge Base Stats"
+      }
+    ]
 },
   "scripts": {
     "vscode:prepublish": "npm run package",

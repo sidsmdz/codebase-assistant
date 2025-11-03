@@ -1,9 +1,13 @@
 import * as vscode from 'vscode';
+import { KnowledgeBaseManager } from './knowledgeBase/KnowledgeBaseManager';
 
 export class ChatViewProvider implements vscode.WebviewViewProvider {
     private _view?: vscode.WebviewView;
 
-    constructor(private readonly _extensionUri: vscode.Uri) {}
+    constructor(
+        private readonly _extensionUri: vscode.Uri,
+        private readonly _kbManager: KnowledgeBaseManager
+    ) {}
 
     public resolveWebviewView(
         webviewView: vscode.WebviewView,
@@ -19,7 +23,6 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
 
         webviewView.webview.html = this._getHtmlForWebview(webviewView.webview);
 
-        // Handle messages from webview
         webviewView.webview.onDidReceiveMessage(async data => {
             switch (data.type) {
                 case 'sendMessage':
@@ -29,54 +32,50 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
         });
     }
 
-    // src/chatViewProvider.ts
-
-private async handleUserMessage(message: string) {
-    this._view?.webview.postMessage({
-        type: 'addMessage',
-        role: 'user',
-        content: message
-    });
-
-    try {
-        this._view?.webview.postMessage({ type: 'startTyping' });
-
+    private async handleUserMessage(message: string) {
         this._view?.webview.postMessage({
             type: 'addMessage',
-            role: 'assistant',
-            content: '🔍 Searching knowledge base...\n📝 Preparing context...\n🚀 Sending to Copilot Chat...'
+            role: 'user',
+            content: message
         });
 
-        // Open Copilot Chat with the message directly
-        await vscode.commands.executeCommand('workbench.panel.chat.view.copilot.focus');
-        
-        await new Promise(resolve => setTimeout(resolve, 300));
+        try {
+            this._view?.webview.postMessage({ type: 'startTyping' });
 
-        // Insert text into chat input
-        await vscode.commands.executeCommand('workbench.action.chat.open', {
-            query: message
-        });
+            const stats = await this._kbManager.getStats();
+            
+            this._view?.webview.postMessage({
+                type: 'addMessage',
+                role: 'assistant',
+                content: `🔍 Searching knowledge base (${stats.fileCount} files)...\n📝 Preparing context...\n🚀 Sending to Copilot Chat...`
+            });
 
-        this._view?.webview.postMessage({
-            type: 'addMessage',
-            role: 'assistant',
-            content: '✅ Sent to Copilot Chat! Check the chat panel →'
-        });
+            await vscode.commands.executeCommand('workbench.panel.chat.view.copilot.focus');
+            await new Promise(resolve => setTimeout(resolve, 300));
+            await vscode.commands.executeCommand('workbench.action.chat.open', {
+                query: message
+            });
 
-    } catch (error) {
-        console.error('OpenCat error:', error);
-        this._view?.webview.postMessage({
-            type: 'addMessage',
-            role: 'assistant',
-            content: `❌ Error: ${error instanceof Error ? error.message : String(error)}`
-        });
-    } finally {
-        this._view?.webview.postMessage({ type: 'stopTyping' });
+            this._view?.webview.postMessage({
+                type: 'addMessage',
+                role: 'assistant',
+                content: '✅ Sent to Copilot Chat! Check the chat panel →'
+            });
+
+        } catch (error) {
+            console.error('OpenCat error:', error);
+            this._view?.webview.postMessage({
+                type: 'addMessage',
+                role: 'assistant',
+                content: `❌ Error: ${error instanceof Error ? error.message : String(error)}`
+            });
+        } finally {
+            this._view?.webview.postMessage({ type: 'stopTyping' });
+        }
     }
-}
 
-    private _getHtmlForWebview(webview: vscode.Webview) {
-        return `<!DOCTYPE html>
+    private _getHtmlForWebview(webview: vscode.Webview): string {
+    return `<!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
@@ -206,7 +205,6 @@ private async handleUserMessage(message: string) {
             const messageDiv = document.createElement('div');
             messageDiv.className = 'message ' + role;
             
-            // Basic markdown-like code block support
             const formattedContent = content.replace(
                 /\`\`\`([\\s\\S]*?)\`\`\`/g,
                 '<pre><code>$1</code></pre>'
@@ -242,7 +240,6 @@ private async handleUserMessage(message: string) {
             }
         });
 
-        // Handle messages from extension
         window.addEventListener('message', event => {
             const message = event.data;
             
@@ -260,10 +257,9 @@ private async handleUserMessage(message: string) {
             }
         });
 
-        // Welcome message
         addMessage('assistant', 'Hello! I\\'m OpenCat 🐱 Ask me anything about code!');
     </script>
 </body>
 </html>`;
-    }
+}
 }
