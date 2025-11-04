@@ -1,7 +1,7 @@
 {
-  "name": "codebase-assistant",
-  "displayName": "Codebase Assistant",
-  "description": "AI-powered code generation assistant for VS Code",
+  "name": "opencat-assistant",
+  "displayName": "OpenCat Assistant",
+  "description": "AI code assistant with company knowledge base integration",
   "version": "0.1.0",
   "publisher": "your-company",
   "repository": {
@@ -10,32 +10,38 @@
   },
   "private": true,
   "engines": {
-    "vscode": "^1.85.0"
+    "vscode": "^1.90.0"
   },
   "categories": [
     "AI",
     "Programming Languages"
   ],
   "activationEvents": [
-    "onStartupFinished"
+    "onView:opencat.chatView"
   ],
   "main": "./dist/extension.js",
   "contributes": {
-    "chatParticipants": [
+  "views": {
+    "explorer": [
       {
-        "id": "codebase",
-        "name": "codebase",
-        "description": "Company codebase pattern assistant",
-        "isSticky": true
-      }
-    ],
-    "commands": [
-      {
-        "command": "codebase-assistant.helloWorld",
-        "title": "Codebase Assistant: Hello World"
+        "type": "webview",
+        "id": "opencat.chatView",
+        "name": "OpenCat"
       }
     ]
   },
+  "commands": [
+      {
+        "command": "opencat.openChat",
+        "title": "OpenCat: Open Chat",
+        "icon": "$(comment-discussion)"
+      },
+      {
+        "command": "opencat.showKBStats",
+        "title": "OpenCat: Show Knowledge Base Stats"
+      }
+    ]
+},
   "scripts": {
     "vscode:prepublish": "npm run package",
     "compile": "npm run check-types && npm run lint && node esbuild.js",
@@ -56,7 +62,7 @@
     "@types/jest": "^30.0.0",
     "@types/mocha": "^10.0.10",
     "@types/node": "^20.10.0",
-    "@types/vscode": "^1.85.0",
+    "@types/vscode": "^1.90.0",
     "@typescript-eslint/eslint-plugin": "^8.46.2",
     "@typescript-eslint/parser": "^8.46.2",
     "@vscode/test-cli": "^0.0.12",

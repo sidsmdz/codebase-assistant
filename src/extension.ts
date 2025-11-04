@@ -1,64 +1,47 @@
 import * as vscode from 'vscode';
+import { ChatViewProvider } from './chatViewProvider';
+import { KnowledgeBaseManager } from './knowledgeBase/KnowledgeBaseManager';
 
-/**
- * Extension activation entry point
- * Called when extension is activated (on VS Code startup)
- */
-export function activate(context: vscode.ExtensionContext) {
-    console.log('🚀 Codebase Assistant is now active!');
+let kbManager: KnowledgeBaseManager;
 
-    // Register a simple command (for testing)
-    const helloCommand = vscode.commands.registerCommand(
-        'codebase-assistant.helloWorld',
-        () => {
+export async function activate(context: vscode.ExtensionContext) {
+    console.log('OpenCat extension activating...');
+
+    // Initialize Knowledge Base
+    kbManager = new KnowledgeBaseManager(context);
+    await kbManager.initialize();
+
+    // Chat view provider
+    const provider = new ChatViewProvider(context.extensionUri, kbManager);
+
+    context.subscriptions.push(
+        vscode.window.registerWebviewViewProvider('opencat.chatView', provider)
+    );
+
+    context.subscriptions.push(
+        vscode.commands.registerCommand('opencat.openChat', () => {
+            vscode.commands.executeCommand('opencat.chatView.focus');
+        })
+    );
+
+    // KB Stats command
+    context.subscriptions.push(
+        vscode.commands.registerCommand('opencat.showKBStats', async () => {
+            const stats = await kbManager.getStats();
             vscode.window.showInformationMessage(
-                '👋 Hello from Codebase Assistant!'
+                `OpenCat Knowledge Base\n` +
+                `Files: ${stats.fileCount}\n` +
+                `Size: ${(stats.totalSize / 1024).toFixed(2)} KB\n` +
+                `Path: ${stats.path}`
             );
-        }
+        })
     );
 
-    // Register the chat participant
-    const chatParticipant = vscode.chat.createChatParticipant(
-        'codebase',
-        handleChatRequest
-    );
-
-    // Set participant metadata
-    chatParticipant.iconPath = vscode.Uri.joinPath(
-        context.extensionUri,
-        'resources',
-        'icon.png'
-    );
-
-    // Add to subscriptions for cleanup
-    context.subscriptions.push(helloCommand, chatParticipant);
-
-    console.log('✅ Codebase Assistant registered successfully');
+    console.log('OpenCat activated successfully');
 }
 
-/**
- * Chat request handler
- * This is called every time user sends a message to @codebase
- */
-async function handleChatRequest(
-    request: vscode.ChatRequest,
-    context: vscode.ChatContext,
-    stream: vscode.ChatResponseStream,
-    token: vscode.CancellationToken
-): Promise<vscode.ChatResult> {
-    
-    // For now, just echo the message back
-    stream.markdown(`**Echo:** ${request.prompt}\n\n`);
-    stream.markdown(`I received your message! 🎉\n\n`);
-    stream.markdown(`_(This is Story 1.1 - basic scaffolding)_`);
+export function deactivate() {}
 
-    return { metadata: { command: 'echo' } };
-}
-
-/**
- * Extension deactivation
- * Called when extension is deactivated
- */
-export function deactivate() {
-    console.log('👋 Codebase Assistant deactivated');
+export function getKBManager(): KnowledgeBaseManager {
+    return kbManager;
 }
