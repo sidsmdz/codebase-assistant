@@ -1,7 +1,7 @@
 {
-  "name": "opencat-assistant",
-  "displayName": "OpenCat Assistant",
-  "description": "AI code assistant with company knowledge base integration",
+  "name": "opencat",
+  "displayName": "OpenCat",
+  "description": "AI code assistant with company knowledge",
   "version": "0.1.0",
   "publisher": "your-company",
   "repository": {
@@ -16,29 +16,32 @@
     "AI",
     "Programming Languages"
   ],
+  "main": "./dist/extension.js",
   "activationEvents": [
     "onView:opencat.chatView"
   ],
-  "main": "./dist/extension.js",
   "contributes": {
-  "views": {
-    "explorer": [
-      {
-        "type": "webview",
-        "id": "opencat.chatView",
-        "name": "OpenCat"
-      }
-    ]
-  },
-  "commands": [
-      {
+    "views": {
+      "explorer": [
+        {
+          "type": "webview",
+          "id": "opencat.chatView",
+          "name": "OpenCat"
+        }
+      ]
+    },
+    "commands": [
+       {
         "command": "opencat.openChat",
-        "title": "OpenCat: Open Chat",
-        "icon": "$(comment-discussion)"
+        "title": "OpenCat: Open Chat"
       },
       {
         "command": "opencat.showKBStats",
         "title": "OpenCat: Show Knowledge Base Stats"
+      },
+      {
+        "command": "opencat.listPatterns",
+        "title": "OpenCat: List Saved Patterns"
       }
     ]
 },

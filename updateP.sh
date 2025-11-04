@@ -1,3 +1,11 @@
+#!/bin/bash
+
+# Update OpenCat with transparency features
+cd ~/awesomeProject/codebase-assistant
+
+echo "Updating chatViewProvider.ts with full transparency..."
+
+cat > src/chatViewProvider.ts << 'EOF'
 import * as vscode from 'vscode';
 import { KnowledgeBaseManager } from './knowledgeBase/KnowledgeBaseManager';
 import { ContextBuilder } from './knowledgeBase/ContextBuilder';
@@ -38,12 +46,6 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
                 case 'savePattern':
                     await this.handleSavePattern();
                     break;
-                case 'confirmSavePattern':
-                    await this.confirmSavePattern(data.name, data.description, data.tags, data.code);
-                    break;
-                case 'cancelSave':
-                    this._view?.webview.postMessage({ type: 'hideSaveForm' });
-                    break;
                 case 'showContext':
                     await this.handleShowContext();
                     break;
@@ -64,9 +66,11 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
             this.lastQuery = message;
             this.lastResponse = '';
 
+            // Build context
             const enrichedPrompt = await this.contextBuilder.buildContextForQuery(message);
             this.lastEnrichedPrompt = enrichedPrompt;
             
+            // Show what context we're sending (transparency!)
             const contextSummary = this.summarizeContext(enrichedPrompt);
             this._view?.webview.postMessage({
                 type: 'addMessage',
@@ -74,17 +78,20 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
                 content: `🔍 Found context:\n${contextSummary}\n\n🤖 Asking Copilot...`
             });
 
+            // Call Copilot directly and capture response
             const response = await this.callCopilot(enrichedPrompt);
             
             if (response) {
                 this.lastResponse = response;
                 
+                // Show response in OpenCat
                 this._view?.webview.postMessage({
                     type: 'addMessage',
                     role: 'assistant',
                     content: response
                 });
 
+                // Show save button if response contains code
                 if (this.containsCode(response)) {
                     this._view?.webview.postMessage({
                         type: 'showSaveButton'
@@ -111,8 +118,10 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     }
 
     private summarizeContext(enrichedPrompt: string): string {
+        const lines = enrichedPrompt.split('\n');
         const summary: string[] = [];
         
+        // Check for saved patterns
         if (enrichedPrompt.includes('Saved patterns from Knowledge Base:')) {
             const patternSection = enrichedPrompt.split('Current workspace code:')[0];
             const patternMatches = patternSection.match(/\*\*(.+?)\*\* \((\w+)\):/g);
@@ -127,6 +136,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
             }
         }
         
+        // Check for workspace patterns
         if (enrichedPrompt.includes('workspace')) {
             const workspaceSection = enrichedPrompt.includes('Current workspace code:') 
                 ? enrichedPrompt.split('Current workspace code:')[1]
@@ -213,71 +223,102 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
 
     private async handleSavePattern() {
         if (!this.lastResponse || this.lastResponse.length === 0) {
-            this._view?.webview.postMessage({
-                type: 'addMessage',
-                role: 'assistant',
-                content: '❌ No response to save. Ask a question first.'
-            });
+            vscode.window.showErrorMessage('No response to save. Ask a question first.');
             return;
         }
 
         const codeBlocks = this.extractCodeBlocks(this.lastResponse);
         
         if (codeBlocks.length === 0) {
-            this._view?.webview.postMessage({
-                type: 'addMessage',
-                role: 'assistant',
-                content: '❌ No code found in the response.'
-            });
+            vscode.window.showErrorMessage('No code found in the response.');
             return;
         }
 
-        const code = codeBlocks[0];
-        const language = this.detectLanguage(code);
-        const suggestedName = this.suggestPatternName(code, this.lastQuery);
-        const suggestedTags = this.suggestTags(code, this.lastQuery);
+        let code = '';
+        if (codeBlocks.length > 1) {
+            const items = codeBlocks.map((block, i) => ({
+                label: `Code Block ${i + 1}`,
+                description: `${block.length} characters`,
+                detail: block.substring(0, 100) + '...',
+                code: block
+            }));
 
-        this._view?.webview.postMessage({
-            type: 'showSaveForm',
-            code: code,
-            language: language,
-            suggestedName: suggestedName,
-            suggestedDescription: this.lastQuery,
-            suggestedTags: suggestedTags
+            const selected = await vscode.window.showQuickPick(items, {
+                placeHolder: 'Multiple code blocks found. Select one:'
+            });
+
+            if (!selected) return;
+            code = selected.code;
+        } else {
+            code = codeBlocks[0];
+        }
+
+        const language = this.detectLanguage(code);
+        const previewDoc = await vscode.workspace.openTextDocument({
+            content: code,
+            language: language
         });
-    }
+        await vscode.window.showTextDocument(previewDoc, { 
+            preview: true, 
+            viewColumn: vscode.ViewColumn.Beside 
+        });
 
-    private async confirmSavePattern(name: string, description: string, tags: string, code: string) {
-        const language = this.detectLanguage(code);
+        const confirm = await vscode.window.showQuickPick(
+            [
+                { label: '✅ Save this pattern', value: 'yes' },
+                { label: '❌ Cancel', value: 'no' }
+            ],
+            { placeHolder: 'Save this code as a pattern?' }
+        );
+
+        await vscode.commands.executeCommand('workbench.action.closeActiveEditor');
+
+        if (confirm?.value !== 'yes') return;
+
+        const name = await vscode.window.showInputBox({
+            prompt: 'Pattern name',
+            value: this.suggestPatternName(code, this.lastQuery)
+        });
+
+        if (!name) return;
+
+        const description = await vscode.window.showInputBox({
+            prompt: 'Description (optional)',
+            value: this.lastQuery
+        });
+
+        const tags = await vscode.window.showInputBox({
+            prompt: 'Tags (comma-separated)',
+            value: this.suggestTags(code, this.lastQuery)
+        });
+
         const type = this.detectType(name + ' ' + description + ' ' + code);
 
         try {
             await this._kbManager.savePattern({
-                name: name.trim(),
+                name,
                 language,
                 type,
                 code: code.trim(),
-                description: description.trim() || this.lastQuery,
+                description: description || this.lastQuery,
                 query: this.lastQuery,
-                tags: tags ? tags.split(',').map(t => t.trim()).filter(t => t.length > 0) : []
+                tags: tags ? tags.split(',').map(t => t.trim()) : []
             });
 
+            vscode.window.showInformationMessage(`✅ Pattern "${name}" saved!`);
+            
             this._view?.webview.postMessage({
                 type: 'addMessage',
                 role: 'assistant',
-                content: `✅ Pattern "${name}" saved to Knowledge Base!\n\nYou can now use this pattern in future queries.`
+                content: `✅ Pattern "${name}" saved to Knowledge Base!`
             });
 
-            this._view?.webview.postMessage({ type: 'hideSaveForm' });
-            this._view?.webview.postMessage({ type: 'hideSaveButton' });
+            this._view?.webview.postMessage({
+                type: 'hideSaveButton'
+            });
 
         } catch (error) {
-            console.error('Save pattern error:', error);
-            this._view?.webview.postMessage({
-                type: 'addMessage',
-                role: 'assistant',
-                content: `❌ Failed to save: ${error}`
-            });
+            vscode.window.showErrorMessage(`Failed to save: ${error}`);
         }
     }
 
@@ -393,100 +434,6 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
             display: none;
         }
 
-        #save-form-container {
-            display: none;
-            padding: 16px;
-            background-color: var(--vscode-editor-inactiveSelectionBackground);
-            border-top: 2px solid var(--vscode-focusBorder);
-            border-bottom: 1px solid var(--vscode-panel-border);
-            max-height: 60vh;
-            overflow-y: auto;
-        }
-
-        #save-form-container.visible {
-            display: block;
-        }
-
-        .form-title {
-            font-size: 14px;
-            font-weight: 600;
-            margin-bottom: 12px;
-            color: var(--vscode-foreground);
-        }
-
-        .code-preview {
-            background-color: var(--vscode-editor-background);
-            border: 1px solid var(--vscode-input-border);
-            border-radius: 4px;
-            padding: 12px;
-            margin-bottom: 12px;
-            font-family: 'Courier New', monospace;
-            font-size: 12px;
-            max-height: 200px;
-            overflow-y: auto;
-            white-space: pre;
-        }
-
-        .form-group {
-            margin-bottom: 12px;
-        }
-
-        .form-label {
-            display: block;
-            font-size: 12px;
-            margin-bottom: 4px;
-            color: var(--vscode-descriptionForeground);
-        }
-
-        .form-input {
-            width: 100%;
-            padding: 6px 8px;
-            background-color: var(--vscode-input-background);
-            color: var(--vscode-input-foreground);
-            border: 1px solid var(--vscode-input-border);
-            border-radius: 4px;
-            font-family: var(--vscode-font-family);
-            font-size: 13px;
-        }
-
-        .form-input:focus {
-            outline: 1px solid var(--vscode-focusBorder);
-        }
-
-        .form-buttons {
-            display: flex;
-            gap: 8px;
-            margin-top: 12px;
-        }
-
-        .btn-save, .btn-cancel {
-            flex: 1;
-            padding: 8px 16px;
-            border: none;
-            border-radius: 4px;
-            cursor: pointer;
-            font-weight: 600;
-            font-size: 13px;
-        }
-
-        .btn-save {
-            background-color: var(--vscode-button-background);
-            color: var(--vscode-button-foreground);
-        }
-
-        .btn-save:hover {
-            background-color: var(--vscode-button-hoverBackground);
-        }
-
-        .btn-cancel {
-            background-color: var(--vscode-button-secondaryBackground);
-            color: var(--vscode-button-secondaryForeground);
-        }
-
-        .btn-cancel:hover {
-            background-color: var(--vscode-button-secondaryHoverBackground);
-        }
-
         #save-button-container {
             padding: 8px 16px;
             text-align: center;
@@ -556,41 +503,10 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
 <body>
     <div id="messages"></div>
     <div id="typing">OpenCat is thinking...</div>
-    
-    <div id="save-form-container">
-        <div class="form-title">💾 Save Pattern to Knowledge Base</div>
-        
-        <div class="form-group">
-            <label class="form-label">Code Preview:</label>
-            <div class="code-preview" id="code-preview"></div>
-        </div>
-
-        <div class="form-group">
-            <label class="form-label">Pattern Name *</label>
-            <input type="text" class="form-input" id="pattern-name" placeholder="e.g., OrderController Pattern">
-        </div>
-
-        <div class="form-group">
-            <label class="form-label">Description</label>
-            <input type="text" class="form-input" id="pattern-description" placeholder="What does this pattern do?">
-        </div>
-
-        <div class="form-group">
-            <label class="form-label">Tags (comma-separated)</label>
-            <input type="text" class="form-input" id="pattern-tags" placeholder="controller, rest, crud">
-        </div>
-
-        <div class="form-buttons">
-            <button class="btn-save" id="confirm-save-btn">✅ Save Pattern</button>
-            <button class="btn-cancel" id="cancel-save-btn">❌ Cancel</button>
-        </div>
-    </div>
-
     <div id="save-button-container">
-        <button id="show-context-btn">🔍 Show Context</button>
+        <button id="show-context-btn">🔍 Show Full Context</button>
         <button id="save-pattern-btn">💾 Save Pattern</button>
     </div>
-    
     <div id="input-area">
         <textarea 
             id="message-input" 
@@ -609,16 +525,6 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
         const saveButtonContainer = document.getElementById('save-button-container');
         const showContextBtn = document.getElementById('show-context-btn');
         const savePatternBtn = document.getElementById('save-pattern-btn');
-        
-        const saveFormContainer = document.getElementById('save-form-container');
-        const codePreview = document.getElementById('code-preview');
-        const patternName = document.getElementById('pattern-name');
-        const patternDescription = document.getElementById('pattern-description');
-        const patternTags = document.getElementById('pattern-tags');
-        const confirmSaveBtn = document.getElementById('confirm-save-btn');
-        const cancelSaveBtn = document.getElementById('cancel-save-btn');
-
-        let currentCode = '';
 
         function addMessage(role, content) {
             const messageDiv = document.createElement('div');
@@ -659,26 +565,6 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
             vscode.postMessage({ type: 'savePattern' });
         });
 
-        confirmSaveBtn.addEventListener('click', () => {
-            const name = patternName.value.trim();
-            if (!name) {
-                alert('Pattern name is required');
-                return;
-            }
-
-            vscode.postMessage({
-                type: 'confirmSavePattern',
-                name: name,
-                description: patternDescription.value.trim(),
-                tags: patternTags.value.trim(),
-                code: currentCode
-            });
-        });
-
-        cancelSaveBtn.addEventListener('click', () => {
-            vscode.postMessage({ type: 'cancelSave' });
-        });
-
         window.addEventListener('message', event => {
             const message = event.data;
             
@@ -699,26 +585,6 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
                 case 'hideSaveButton':
                     saveButtonContainer.style.display = 'none';
                     break;
-                case 'showSaveForm':
-                    currentCode = message.code;
-                    const preview = message.code.length > 500 
-                        ? message.code.substring(0, 500) + '\\n\\n... [truncated ' + (message.code.length - 500) + ' characters]'
-                        : message.code;
-                    codePreview.textContent = preview;
-                    patternName.value = message.suggestedName;
-                    patternDescription.value = message.suggestedDescription;
-                    patternTags.value = message.suggestedTags;
-                    saveFormContainer.classList.add('visible');
-                    saveButtonContainer.style.display = 'none';
-                    messagesDiv.scrollTop = messagesDiv.scrollHeight;
-                    break;
-                case 'hideSaveForm':
-                    saveFormContainer.classList.remove('visible');
-                    patternName.value = '';
-                    patternDescription.value = '';
-                    patternTags.value = '';
-                    currentCode = '';
-                    break;
             }
         });
 
@@ -728,3 +594,21 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
 </html>`;
     }
 }
+EOF
+
+echo "✅ chatViewProvider.ts updated"
+
+# Compile
+npm run compile
+
+echo ""
+echo "✅ All updates complete!"
+echo ""
+echo "Test the new features:"
+echo "1. Press F5 to debug"
+echo "2. Ask: 'create order controller'"
+echo "3. See context summary (KB + Workspace)"
+echo "4. Click '🔍 Show Full Context' to see exact prompt"
+echo "5. Click '💾 Save Pattern' if code is good"
+echo ""
+echo "Full transparency enabled!"
