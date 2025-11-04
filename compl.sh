@@ -1,3 +1,11 @@
+#!/bin/bash
+
+# Update OpenCat with inline save form
+cd ~/awesomeProject/codebase-assistant
+
+echo "Creating inline save form for OpenCat..."
+
+cat > src/chatViewProvider.ts << 'EOF'
 import * as vscode from 'vscode';
 import { KnowledgeBaseManager } from './knowledgeBase/KnowledgeBaseManager';
 import { ContextBuilder } from './knowledgeBase/ContextBuilder';
@@ -728,3 +736,22 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
 </html>`;
     }
 }
+EOF
+
+echo "✅ chatViewProvider.ts updated with inline form"
+
+npm run compile
+
+echo ""
+echo "✅ Complete! Story 2.3 finished!"
+echo ""
+echo "New Flow:"
+echo "1. F5 to debug"
+echo "2. Ask: 'create payment controller'"
+echo "3. Copilot responds in OpenCat"
+echo "4. Click '💾 Save Pattern'"
+echo "5. Form appears IN OpenCat (no dialogs!)"
+echo "6. Edit fields → Click '✅ Save Pattern'"
+echo "7. Done! Pattern saved to KB"
+echo ""
+echo "Test it now!"

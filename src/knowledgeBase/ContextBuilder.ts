@@ -1,25 +1,35 @@
 import * as vscode from 'vscode';
 import { DependencyTracer } from './DependencyTracer';
+import { KnowledgeBaseManager } from './KnowledgeBaseManager';
 
 export class ContextBuilder {
     
+    constructor(private kbManager?: KnowledgeBaseManager) {}
+
     async buildContextForQuery(userQuery: string): Promise<string> {
         const workspaceFolders = vscode.workspace.workspaceFolders;
-        if (!workspaceFolders) {
-            return userQuery;
-        }
-
+        
         try {
             const tracer = new DependencyTracer();
-            await tracer.buildClassMap();
+            
+            // Get workspace context
+            let relevantClasses: any[] = [];
+            if (workspaceFolders) {
+                await tracer.buildClassMap();
+                relevantClasses = this.findRelevantClasses(tracer, userQuery);
+            }
 
-            const relevantClasses = this.findRelevantClasses(tracer, userQuery);
+            // Get saved patterns from KB
+            let savedPatterns: any[] = [];
+            if (this.kbManager) {
+                savedPatterns = await this.kbManager.searchPatterns(userQuery);
+            }
 
-            if (relevantClasses.length === 0) {
+            if (relevantClasses.length === 0 && savedPatterns.length === 0) {
                 return userQuery;
             }
 
-            return this.buildEnrichedPrompt(userQuery, relevantClasses);
+            return this.buildEnrichedPrompt(userQuery, relevantClasses, savedPatterns);
 
         } catch (error) {
             console.error('Failed to build context:', error);
@@ -50,7 +60,7 @@ export class ContextBuilder {
             }
         });
 
-        return relevant.slice(0, 2); // Reduced from 3 to 2
+        return relevant.slice(0, 2);
     }
 
     private extractKeywords(query: string): string[] {
@@ -65,16 +75,32 @@ export class ContextBuilder {
         return [...new Set(words)];
     }
 
-    private buildEnrichedPrompt(userQuery: string, relevantClasses: any[]): string {
-        let prompt = `Context from workspace:\n\n`;
+    private buildEnrichedPrompt(userQuery: string, relevantClasses: any[], savedPatterns: any[]): string {
+        let prompt = '';
 
-        relevantClasses.forEach((classInfo, index) => {
-            // Extract only the essential parts
-            const snippet = this.extractEssentialSnippet(classInfo);
-            
-            prompt += `**${classInfo.className}** (${classInfo.type}):\n`;
-            prompt += `\`\`\`${classInfo.language}\n${snippet}\n\`\`\`\n\n`;
-        });
+        // Add saved patterns first (higher priority)
+        if (savedPatterns.length > 0) {
+            prompt += `Saved patterns from Knowledge Base:\n\n`;
+            savedPatterns.slice(0, 2).forEach((pattern) => {
+                prompt += `**${pattern.name}** (${pattern.type}):\n`;
+                prompt += `\`\`\`${pattern.language}\n${pattern.code}\n\`\`\`\n\n`;
+            });
+        }
+
+        // Add workspace context
+        if (relevantClasses.length > 0) {
+            if (savedPatterns.length > 0) {
+                prompt += `Current workspace code:\n\n`;
+            } else {
+                prompt += `Context from workspace:\n\n`;
+            }
+
+            relevantClasses.forEach((classInfo) => {
+                const snippet = this.extractEssentialSnippet(classInfo);
+                prompt += `**${classInfo.className}** (${classInfo.type}):\n`;
+                prompt += `\`\`\`${classInfo.language}\n${snippet}\n\`\`\`\n\n`;
+            });
+        }
 
         prompt += `---\n\n`;
         prompt += `User: ${userQuery}\n\n`;
@@ -82,6 +108,8 @@ export class ContextBuilder {
 
         return prompt;
     }
+
+    
 
     private extractEssentialSnippet(classInfo: any): string {
     const content = classInfo.content;

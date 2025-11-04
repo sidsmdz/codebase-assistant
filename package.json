@@ -31,13 +31,17 @@
       ]
     },
     "commands": [
-      {
+       {
         "command": "opencat.openChat",
         "title": "OpenCat: Open Chat"
       },
       {
         "command": "opencat.showKBStats",
         "title": "OpenCat: Show Knowledge Base Stats"
+      },
+      {
+        "command": "opencat.listPatterns",
+        "title": "OpenCat: List Saved Patterns"
       }
     ]
   },
