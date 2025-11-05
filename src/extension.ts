@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
 import { ChatViewProvider } from './chatViewProvider';
 import { KnowledgeBaseManager } from './knowledgeBase/KnowledgeBaseManager';
+import { IngestionService } from './ingestionService';
 
 let kbManager: KnowledgeBaseManager;
 
@@ -23,10 +24,17 @@ export async function activate(context: vscode.ExtensionContext) {
     );
 
     context.subscriptions.push(
+        vscode.commands.registerCommand('opencat.ingestWorkspace', async () => {
+            const ingestService = new IngestionService(kbManager);
+            await ingestService.runIngestion();
+        })
+    );
+
+    context.subscriptions.push(
         vscode.commands.registerCommand('opencat.showKBStats', async () => {
             const stats = await kbManager.getStats();
             vscode.window.showInformationMessage(
-                `OpenCat Knowledge Base\n` +
+                `OpenCat Knowledge Base (SQLite)\n` +
                 `Patterns: ${stats.patternCount}\n` +
                 `Path: ${stats.path}`
             );
@@ -38,13 +46,13 @@ export async function activate(context: vscode.ExtensionContext) {
             const patterns = await kbManager.getAllPatterns();
             
             if (patterns.length === 0) {
-                vscode.window.showInformationMessage('No patterns saved yet. Generate code with OpenCat and save patterns!');
+                vscode.window.showInformationMessage('No patterns saved. Run "OpenCat: Index Workspace" to get started!');
                 return;
             }
 
             const items = patterns.map(p => ({
                 label: `${p.name}`,
-                description: `${p.language} • ${p.type}`,
+                description: `${p.language} • ${p.tags.join(', ')}`,
                 detail: p.description,
                 pattern: p
             }));

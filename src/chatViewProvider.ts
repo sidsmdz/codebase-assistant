@@ -1,4 +1,8 @@
+//
+// THIS IS THE FULL, CORRECTED FILE: src/chatViewProvider.ts
+//
 import * as vscode from 'vscode';
+import * as path from 'path'; // Make sure path is imported
 import { KnowledgeBaseManager } from './knowledgeBase/KnowledgeBaseManager';
 import { ContextBuilder } from './knowledgeBase/ContextBuilder';
 
@@ -67,13 +71,17 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
             const enrichedPrompt = await this.contextBuilder.buildContextForQuery(message);
             this.lastEnrichedPrompt = enrichedPrompt;
             
+            // --- THIS IS THE FUNCTION WITH THE BUG ---
             const contextSummary = this.summarizeContext(enrichedPrompt);
+            // --- END OF BUGGY FUNCTION ---
+            
             this._view?.webview.postMessage({
                 type: 'addMessage',
                 role: 'assistant',
                 content: `🔍 Found context:\n${contextSummary}\n\n🤖 Asking Copilot...`
             });
 
+            // Even if summary is wrong, the prompt itself is correct
             const response = await this.callCopilot(enrichedPrompt);
             
             if (response) {
@@ -110,41 +118,57 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
         }
     }
 
+    // ---
+    // --- THIS IS THE CORRECTED FUNCTION ---
+    // ---
     private summarizeContext(enrichedPrompt: string): string {
         const summary: string[] = [];
         
-        if (enrichedPrompt.includes('Saved patterns from Knowledge Base:')) {
-            const patternSection = enrichedPrompt.split('Current workspace code:')[0];
-            const patternMatches = patternSection.match(/\*\*(.+?)\*\* \((\w+)\):/g);
+        // This part checks for saved patterns
+        if (enrichedPrompt.includes('--- CONTEXT: SAVED KNOWLEDGE BASE PATTERNS ---')) {
+            const patternSection = enrichedPrompt.split('--- CONTEXT:')[1];
+            
+            // --- THIS IS THE FIX ---
+            // The old regex was wrong. This one matches:
+            // **Pattern: Create Stack Pattern** (Description: how to create a stack)
+            const patternMatches = patternSection.match(/\*\*Pattern: (.*?)\*\* \(Description: (.*?)\)/g);
+            // --- END OF FIX ---
+
             if (patternMatches && patternMatches.length > 0) {
                 summary.push('📚 From Knowledge Base:');
                 patternMatches.forEach(match => {
-                    const parts = match.match(/\*\*(.+?)\*\* \((\w+)\):/);
+                    // --- THIS IS THE FIX ---
+                    const parts = match.match(/\*\*Pattern: (.*?)\*\* \(Description: (.*?)\)/);
+                    // --- END OF FIX ---
                     if (parts) {
-                        summary.push(`  • ${parts[1]} (${parts[2]})`);
+                        summary.push(`  • ${parts[1]}`); // Just show the pattern name
                     }
                 });
             }
         }
         
-        if (enrichedPrompt.includes('workspace')) {
-            const workspaceSection = enrichedPrompt.includes('Current workspace code:') 
-                ? enrichedPrompt.split('Current workspace code:')[1]
-                : enrichedPrompt;
-            const workspaceMatches = workspaceSection.match(/\*\*(\w+)\*\* \((\w+)\):/g);
+        // This part checks for workspace context
+        if (enrichedPrompt.includes('--- CONTEXT: RELEVANT EXAMPLES FROM WORKSPACE ---')) {
+            const workspaceSection = enrichedPrompt.split('--- CONTEXT: RELEVANT EXAMPLES FROM WORKSPACE ---')[1];
+
+            // This regex matches the pattern: **Example from /path/to/file.java**:
+            const workspaceMatches = workspaceSection.match(/\*\*Example from (.*?)\*\*:/g); 
+            
             if (workspaceMatches && workspaceMatches.length > 0) {
                 summary.push('💻 From Workspace:');
                 workspaceMatches.slice(0, 3).forEach(match => {
-                    const parts = match.match(/\*\*(\w+)\*\* \((\w+)\):/);
+                    const parts = match.match(/\*\*Example from (.*?)\*\*:/);
                     if (parts) {
-                        summary.push(`  • ${parts[1]} (${parts[2]})`);
+                        const fileName = parts[1].split(path.sep).pop() || parts[1];
+                        summary.push(`  • ${fileName}`);
                     }
                 });
             }
         }
         
         if (summary.length === 0) {
-            return '  • No patterns found\n  • Asking Copilot directly';
+            // This is the line that's being incorrectly triggered
+            return '  • No context found\n  • Asking Copilot directly';
         }
         
         return summary.join('\n');
@@ -163,9 +187,11 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
 
             const model = models[0];
             
-            const messages = [
-                vscode.LanguageModelChatMessage.User(prompt)
-            ];
+            // If the prompt is just the user query, wrap it in a simple message.
+            // Otherwise, send the full engineered prompt.
+            const messages = (prompt.includes('--- CONTEXT ---') || prompt.includes('You are a helpful and precise code assistant'))
+                ? [vscode.LanguageModelChatMessage.User(prompt)]
+                : [vscode.LanguageModelChatMessage.User(prompt)]; // Kept simple, as the prompt is now built to handle both cases
 
             const chatResponse = await model.sendRequest(
                 messages,
@@ -255,7 +281,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
             await this._kbManager.savePattern({
                 name: name.trim(),
                 language,
-                type,
+                // type,
                 code: code.trim(),
                 description: description.trim() || this.lastQuery,
                 query: this.lastQuery,
@@ -341,6 +367,15 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     }
 
     private _getHtmlForWebview(webview: vscode.Webview): string {
+        // ... (This function remains unchanged, no need to copy it) ...
+        // ... (It's just the HTML string) ...
+        // ... (Your existing HTML is perfectly fine) ...
+        // Note: For this script to be 100% complete, you would paste your
+        // existing _getHtmlForWebview function here. I am omitting it
+        // for brevity as it is not part of the bug.
+        
+        // --- PASTE YOUR EXISTING _getHtmlForWebview function here ---
+        // It starts with: return `<!DOCTYPE html>...`
         return `<!DOCTYPE html>
 <html lang="en">
 <head>

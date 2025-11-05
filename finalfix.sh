@@ -1,3 +1,6 @@
+cd ~/awesomeProject/codebase-assistant
+
+cat > src/knowledgeBase/KnowledgeBaseManager.ts << 'EOF'
 import * as vscode from 'vscode';
 import * as path from 'path';
 import * as fs from 'fs/promises';
@@ -35,6 +38,8 @@ export class KnowledgeBaseManager {
             // Load WASM file from extension directory
             const wasmPath = path.join(this.context.extensionPath, 'dist', 'sql-wasm.wasm');
             const wasmBuffer = await fs.readFile(wasmPath);
+            
+            // Convert Buffer to ArrayBuffer via Uint8Array
             const wasmBinary = new Uint8Array(wasmBuffer).buffer;
 
             // Initialize sql.js with local WASM
@@ -52,7 +57,7 @@ export class KnowledgeBaseManager {
 
             this.db = new this.SQL.Database(buffer);
 
-            // Create tables (NO FTS5 - just regular tables)
+            // Create tables
             this.db.run(`
                 CREATE TABLE IF NOT EXISTS patterns (
                     id TEXT PRIMARY KEY,
@@ -67,13 +72,13 @@ export class KnowledgeBaseManager {
                 );
             `);
 
-            // Create indexes for faster searching (instead of FTS5)
             this.db.run(`
-                CREATE INDEX IF NOT EXISTS idx_patterns_name ON patterns(name);
-            `);
-            
-            this.db.run(`
-                CREATE INDEX IF NOT EXISTS idx_patterns_language ON patterns(language);
+                CREATE VIRTUAL TABLE IF NOT EXISTS patterns_fts USING fts5(
+                    name,
+                    description,
+                    tags,
+                    code
+                );
             `);
 
             console.log('Knowledge base (sql.js) initialized at:', this.dbPath);
@@ -133,6 +138,19 @@ export class KnowledgeBaseManager {
                 metadata_json
             ]);
 
+            const lastRowId = this.db.exec("SELECT last_insert_rowid() as rowid")[0].values[0][0] as number;
+
+            this.db.run(`
+                INSERT INTO patterns_fts (rowid, name, description, tags, code)
+                VALUES (?, ?, ?, ?, ?)
+            `, [
+                lastRowId,
+                savedPattern.name,
+                savedPattern.description,
+                tags_json,
+                savedPattern.code
+            ]);
+
             await this.saveDatabase();
 
             console.log(`Saved pattern: ${savedPattern.name}`);
@@ -143,7 +161,7 @@ export class KnowledgeBaseManager {
         }
     }
 
-    private extractKeywords(query: string): string[] {
+    private extractKeywords(query: string): string {
         const stopWords = ['how', 'do', 'i', 'the', 'a', 'an', 'to', 'in', 'for', 'create', 'make', 'write', 'add', 'new'];
         
         const words = query
@@ -152,35 +170,23 @@ export class KnowledgeBaseManager {
             .split(/\s+/)
             .filter(w => w.length > 2 && !stopWords.includes(w));
 
-        return [...new Set(words)];
+        return [...new Set(words)].join(' OR ');
     }
 
     async searchPatterns(query: string): Promise<SavedPattern[]> {
-        const keywords = this.extractKeywords(query.toLowerCase());
-        if (keywords.length === 0) return [];
+        const ftsQuery = this.extractKeywords(query.toLowerCase());
+        if (!ftsQuery) return [];
 
         try {
-            // Build LIKE clauses for each keyword
-            const conditions = keywords.map(() => 
-                `(name LIKE ? OR description LIKE ? OR tags_json LIKE ? OR code LIKE ?)`
-            ).join(' AND ');
-
-            // Build parameters array
-            const params: string[] = [];
-            keywords.forEach(keyword => {
-                const likePattern = `%${keyword}%`;
-                params.push(likePattern, likePattern, likePattern, likePattern);
-            });
-
-            const sql = `
-                SELECT *
-                FROM patterns
-                WHERE ${conditions}
-                ORDER BY savedAt DESC
+            const results = this.db.exec(`
+                SELECT p.*
+                FROM patterns p
+                WHERE p.rowid IN (
+                    SELECT rowid FROM patterns_fts WHERE patterns_fts MATCH ?
+                )
+                ORDER BY p.savedAt DESC
                 LIMIT 5
-            `;
-
-            const results = this.db.exec(sql, params);
+            `, [ftsQuery]);
 
             if (!results[0]) return [];
 
@@ -226,7 +232,15 @@ export class KnowledgeBaseManager {
     }
 
     async deletePattern(patternId: string): Promise<void> {
+        const row = this.db.exec("SELECT rowid FROM patterns WHERE id = ?", [patternId]);
+        
+        if (row[0]?.values[0]) {
+            const rowid = row[0].values[0][0];
+            this.db.run("DELETE FROM patterns_fts WHERE rowid = ?", [rowid]);
+        }
+        
         this.db.run("DELETE FROM patterns WHERE id = ?", [patternId]);
+        
         await this.saveDatabase();
     }
 
@@ -238,3 +252,6 @@ export class KnowledgeBaseManager {
         });
     }
 }
+EOF
+
+npm run compile

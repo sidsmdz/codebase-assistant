@@ -1,3 +1,109 @@
+#!/bin/bash
+
+# Fix sql.js WASM loading in VS Code extension
+set -e
+
+PROJECT_DIR=~/awesomeProject/codebase-assistant
+
+echo "============================================"
+echo "Fixing sql.js WASM loading..."
+echo "============================================"
+echo ""
+
+cd "$PROJECT_DIR"
+
+# Step 1: Update esbuild.js to copy WASM file
+echo "Step 1/3: Updating esbuild.js..."
+cat > esbuild.js << 'EOF'
+const esbuild = require("esbuild");
+const fs = require("fs");
+const path = require("path");
+
+const production = process.argv.includes('--production');
+const watch = process.argv.includes('--watch');
+
+/**
+ * @type {import('esbuild').Plugin}
+ */
+const esbuildProblemMatcherPlugin = {
+	name: 'esbuild-problem-matcher',
+
+	setup(build) {
+		build.onStart(() => {
+			console.log('[watch] build started');
+		});
+		build.onEnd((result) => {
+			result.errors.forEach(({ text, location }) => {
+				console.error(`✘ [ERROR] ${text}`);
+				console.error(`    ${location.file}:${location.line}:${location.column}:`);
+			});
+			console.log('[watch] build finished');
+		});
+	},
+};
+
+/**
+ * Copy sql.js WASM file to dist
+ * @type {import('esbuild').Plugin}
+ */
+const copyWasmPlugin = {
+	name: 'copy-wasm',
+	setup(build) {
+		build.onEnd(() => {
+			const wasmSource = path.join(__dirname, 'node_modules', 'sql.js', 'dist', 'sql-wasm.wasm');
+			const wasmDest = path.join(__dirname, 'dist', 'sql-wasm.wasm');
+			
+			try {
+				if (!fs.existsSync(path.join(__dirname, 'dist'))) {
+					fs.mkdirSync(path.join(__dirname, 'dist'), { recursive: true });
+				}
+				fs.copyFileSync(wasmSource, wasmDest);
+				console.log('[copy-wasm] sql-wasm.wasm copied to dist/');
+			} catch (error) {
+				console.error('[copy-wasm] Failed to copy WASM file:', error);
+			}
+		});
+	}
+};
+
+async function main() {
+	const ctx = await esbuild.context({
+		entryPoints: [
+			'src/extension.ts'
+		],
+		bundle: true,
+		format: 'cjs',
+		minify: production,
+		sourcemap: !production,
+		sourcesContent: false,
+		platform: 'node',
+		outfile: 'dist/extension.js',
+		external: ['vscode'],
+		logLevel: 'silent',
+		plugins: [
+			copyWasmPlugin,
+			esbuildProblemMatcherPlugin,
+		],
+	});
+	if (watch) {
+		await ctx.watch();
+	} else {
+		await ctx.rebuild();
+		await ctx.dispose();
+	}
+}
+
+main().catch(e => {
+	console.error(e);
+	process.exit(1);
+});
+EOF
+echo "✅ esbuild.js updated"
+echo ""
+
+# Step 2: Update KnowledgeBaseManager.ts to use local WASM
+echo "Step 2/3: Updating KnowledgeBaseManager.ts..."
+cat > src/knowledgeBase/KnowledgeBaseManager.ts << 'EOF'
 import * as vscode from 'vscode';
 import * as path from 'path';
 import * as fs from 'fs/promises';
@@ -34,8 +140,7 @@ export class KnowledgeBaseManager {
             
             // Load WASM file from extension directory
             const wasmPath = path.join(this.context.extensionPath, 'dist', 'sql-wasm.wasm');
-            const wasmBuffer = await fs.readFile(wasmPath);
-            const wasmBinary = new Uint8Array(wasmBuffer).buffer;
+            const wasmBinary = await fs.readFile(wasmPath);
 
             // Initialize sql.js with local WASM
             this.SQL = await initSqlJs({
@@ -52,7 +157,7 @@ export class KnowledgeBaseManager {
 
             this.db = new this.SQL.Database(buffer);
 
-            // Create tables (NO FTS5 - just regular tables)
+            // Create tables
             this.db.run(`
                 CREATE TABLE IF NOT EXISTS patterns (
                     id TEXT PRIMARY KEY,
@@ -67,13 +172,13 @@ export class KnowledgeBaseManager {
                 );
             `);
 
-            // Create indexes for faster searching (instead of FTS5)
             this.db.run(`
-                CREATE INDEX IF NOT EXISTS idx_patterns_name ON patterns(name);
-            `);
-            
-            this.db.run(`
-                CREATE INDEX IF NOT EXISTS idx_patterns_language ON patterns(language);
+                CREATE VIRTUAL TABLE IF NOT EXISTS patterns_fts USING fts5(
+                    name,
+                    description,
+                    tags,
+                    code
+                );
             `);
 
             console.log('Knowledge base (sql.js) initialized at:', this.dbPath);
@@ -133,6 +238,19 @@ export class KnowledgeBaseManager {
                 metadata_json
             ]);
 
+            const lastRowId = this.db.exec("SELECT last_insert_rowid() as rowid")[0].values[0][0] as number;
+
+            this.db.run(`
+                INSERT INTO patterns_fts (rowid, name, description, tags, code)
+                VALUES (?, ?, ?, ?, ?)
+            `, [
+                lastRowId,
+                savedPattern.name,
+                savedPattern.description,
+                tags_json,
+                savedPattern.code
+            ]);
+
             await this.saveDatabase();
 
             console.log(`Saved pattern: ${savedPattern.name}`);
@@ -143,7 +261,7 @@ export class KnowledgeBaseManager {
         }
     }
 
-    private extractKeywords(query: string): string[] {
+    private extractKeywords(query: string): string {
         const stopWords = ['how', 'do', 'i', 'the', 'a', 'an', 'to', 'in', 'for', 'create', 'make', 'write', 'add', 'new'];
         
         const words = query
@@ -152,35 +270,23 @@ export class KnowledgeBaseManager {
             .split(/\s+/)
             .filter(w => w.length > 2 && !stopWords.includes(w));
 
-        return [...new Set(words)];
+        return [...new Set(words)].join(' OR ');
     }
 
     async searchPatterns(query: string): Promise<SavedPattern[]> {
-        const keywords = this.extractKeywords(query.toLowerCase());
-        if (keywords.length === 0) return [];
+        const ftsQuery = this.extractKeywords(query.toLowerCase());
+        if (!ftsQuery) return [];
 
         try {
-            // Build LIKE clauses for each keyword
-            const conditions = keywords.map(() => 
-                `(name LIKE ? OR description LIKE ? OR tags_json LIKE ? OR code LIKE ?)`
-            ).join(' AND ');
-
-            // Build parameters array
-            const params: string[] = [];
-            keywords.forEach(keyword => {
-                const likePattern = `%${keyword}%`;
-                params.push(likePattern, likePattern, likePattern, likePattern);
-            });
-
-            const sql = `
-                SELECT *
-                FROM patterns
-                WHERE ${conditions}
-                ORDER BY savedAt DESC
+            const results = this.db.exec(`
+                SELECT p.*
+                FROM patterns p
+                WHERE p.rowid IN (
+                    SELECT rowid FROM patterns_fts WHERE patterns_fts MATCH ?
+                )
+                ORDER BY p.savedAt DESC
                 LIMIT 5
-            `;
-
-            const results = this.db.exec(sql, params);
+            `, [ftsQuery]);
 
             if (!results[0]) return [];
 
@@ -226,7 +332,15 @@ export class KnowledgeBaseManager {
     }
 
     async deletePattern(patternId: string): Promise<void> {
+        const row = this.db.exec("SELECT rowid FROM patterns WHERE id = ?", [patternId]);
+        
+        if (row[0]?.values[0]) {
+            const rowid = row[0].values[0][0];
+            this.db.run("DELETE FROM patterns_fts WHERE rowid = ?", [rowid]);
+        }
+        
         this.db.run("DELETE FROM patterns WHERE id = ?", [patternId]);
+        
         await this.saveDatabase();
     }
 
@@ -238,3 +352,37 @@ export class KnowledgeBaseManager {
         });
     }
 }
+EOF
+echo "✅ KnowledgeBaseManager.ts updated"
+echo ""
+
+# Step 3: Compile
+echo "Step 3/3: Compiling extension..."
+npm run compile
+echo "✅ Compilation complete"
+echo ""
+
+# Verify WASM file was copied
+if [ -f "dist/sql-wasm.wasm" ]; then
+    echo "✅ sql-wasm.wasm found in dist/"
+else
+    echo "⚠️  Warning: sql-wasm.wasm not found in dist/"
+    echo "   Manually copying..."
+    cp node_modules/sql.js/dist/sql-wasm.wasm dist/
+fi
+
+echo ""
+echo "============================================"
+echo "✅ Fix Complete!"
+echo "============================================"
+echo ""
+echo "What changed:"
+echo "  1. esbuild now copies sql-wasm.wasm to dist/"
+echo "  2. KnowledgeBaseManager loads WASM from local file"
+echo "  3. No more external HTTP requests"
+echo ""
+echo "Next steps:"
+echo "  1. Press F5 to debug"
+echo "  2. Extension should activate without errors"
+echo "  3. Run 'OpenCat: Index Workspace'"
+echo ""

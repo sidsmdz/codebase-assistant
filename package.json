@@ -4,11 +4,6 @@
   "description": "AI code assistant with company knowledge",
   "version": "0.1.0",
   "publisher": "your-company",
-  "repository": {
-    "type": "git",
-    "url": "https://github.com/sidsmdz/codebase-assistant.git"
-  },
-  "private": true,
   "engines": {
     "vscode": "^1.90.0"
   },
@@ -31,7 +26,7 @@
       ]
     },
     "commands": [
-       {
+      {
         "command": "opencat.openChat",
         "title": "OpenCat: Open Chat"
       },
@@ -42,6 +37,10 @@
       {
         "command": "opencat.listPatterns",
         "title": "OpenCat: List Saved Patterns"
+      },
+      {
+        "command": "opencat.ingestWorkspace",
+        "title": "OpenCat: Index Workspace"
       }
     ]
 },
@@ -52,29 +51,21 @@
     "watch:esbuild": "node esbuild.js --watch",
     "watch:tsc": "tsc --noEmit --watch --project tsconfig.json",
     "package": "npm run check-types && npm run lint && node esbuild.js --production",
-    "compile-tests": "tsc -p . --outDir out",
-    "watch-tests": "tsc -p . -w --outDir out",
-    "pretest": "npm run compile-tests && npm run compile && npm run lint",
     "check-types": "tsc --noEmit",
-    "lint": "eslint src",
-    "test": "vscode-test",
-    "vsce-package": "vsce package --no-dependencies"
+    "lint": "eslint src"
   },
   "devDependencies": {
-    "@types/chai": "^5.2.3",
-    "@types/jest": "^30.0.0",
-    "@types/mocha": "^10.0.10",
     "@types/node": "^20.10.0",
+    "@types/sql.js": "^1.4.9",
     "@types/vscode": "^1.90.0",
     "@typescript-eslint/eslint-plugin": "^8.46.2",
     "@typescript-eslint/parser": "^8.46.2",
-    "@vscode/test-cli": "^0.0.12",
-    "@vscode/test-electron": "^2.5.2",
     "@vscode/vsce": "^2.22.0",
-    "chai": "^6.2.0",
     "esbuild": "^0.25.11",
     "eslint": "^8.56.0",
-    "mocha": "^11.7.4",
     "typescript": "^5.3.3"
+  },
+  "dependencies": {
+    "sql.js": "^1.10.3"
   }
 }

@@ -1,4 +1,6 @@
 const esbuild = require("esbuild");
+const fs = require("fs");
+const path = require("path");
 
 const production = process.argv.includes('--production');
 const watch = process.argv.includes('--watch');
@@ -23,6 +25,30 @@ const esbuildProblemMatcherPlugin = {
 	},
 };
 
+/**
+ * Copy sql.js WASM file to dist
+ * @type {import('esbuild').Plugin}
+ */
+const copyWasmPlugin = {
+	name: 'copy-wasm',
+	setup(build) {
+		build.onEnd(() => {
+			const wasmSource = path.join(__dirname, 'node_modules', 'sql.js', 'dist', 'sql-wasm.wasm');
+			const wasmDest = path.join(__dirname, 'dist', 'sql-wasm.wasm');
+			
+			try {
+				if (!fs.existsSync(path.join(__dirname, 'dist'))) {
+					fs.mkdirSync(path.join(__dirname, 'dist'), { recursive: true });
+				}
+				fs.copyFileSync(wasmSource, wasmDest);
+				console.log('[copy-wasm] sql-wasm.wasm copied to dist/');
+			} catch (error) {
+				console.error('[copy-wasm] Failed to copy WASM file:', error);
+			}
+		});
+	}
+};
+
 async function main() {
 	const ctx = await esbuild.context({
 		entryPoints: [
@@ -38,7 +64,7 @@ async function main() {
 		external: ['vscode'],
 		logLevel: 'silent',
 		plugins: [
-			/* add to the end of plugins array */
+			copyWasmPlugin,
 			esbuildProblemMatcherPlugin,
 		],
 	});
