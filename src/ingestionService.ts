@@ -1,15 +1,27 @@
 import * as vscode from 'vscode';
 import * as fs from 'fs/promises';
 import * as path from 'path';
+import * as crypto from 'crypto';
 import { KnowledgeBaseManager } from './knowledgeBase/KnowledgeBaseManager';
+import { JavaASTParser } from './parsers/JavaASTParser';
+import { TypeScriptASTParser } from './parsers/TypeScriptASTParser';
+import { ASTNode } from './parsers/ASTParser';
 
 export class IngestionService {
-    constructor(private kbManager: KnowledgeBaseManager) {}
+    private javaParser: JavaASTParser;
+    private tsParser: TypeScriptASTParser;
+    private jsParser: TypeScriptASTParser;
+
+    constructor(private kbManager: KnowledgeBaseManager) {
+        this.javaParser = new JavaASTParser();
+        this.tsParser = new TypeScriptASTParser(true);  // TypeScript
+        this.jsParser = new TypeScriptASTParser(false); // JavaScript
+    }
 
     async runIngestion() {
         await vscode.window.withProgress({
             location: vscode.ProgressLocation.Notification,
-            title: "OpenCat: Indexing workspace...",
+            title: "OpenCat: Indexing workspace with AST + BM25...",
             cancellable: true
         }, async (progress, token) => {
 
@@ -18,13 +30,11 @@ export class IngestionService {
                 '**/*.ts',
                 '**/*.tsx',
                 '**/*.js',
-                '**/*.jsx',
-                '**/*.py',
-                '**/*.go',
-                '**/*.rs',
-                '**/*.proto'
+                '**/*.jsx'
             ];
 
+            // Find all files
+            progress.report({ message: "Finding files..." });
             let allFiles: vscode.Uri[] = [];
             for (const pattern of patterns) {
                 const files = await vscode.workspace.findFiles(pattern, '**/node_modules/**');
@@ -32,58 +42,145 @@ export class IngestionService {
             }
 
             let patternsSaved = 0;
+            let astNodesSaved = 0;
+            let filesProcessed = 0;
+            let filesSkipped = 0;
             const seenPatterns = new Set<string>();
 
             for (let i = 0; i < allFiles.length; i++) {
                 const file = allFiles[i];
-                if (token.isCancellationRequested) break;
+                if (token.isCancellationRequested) {
+                    break;
+                }
 
                 const fileName = path.basename(file.fsPath);
-                progress.report({ 
-                    message: `Scanning: ${fileName}`,
-                    increment: (i / allFiles.length) * 100 
-                });
+                const relativePath = vscode.workspace.asRelativePath(file.fsPath);
 
                 try {
+                    // Get file stats for incremental indexing
+                    const stats = await fs.stat(file.fsPath);
                     const content = await fs.readFile(file.fsPath, 'utf-8');
-                    const language = this.detectLanguage(file.fsPath);
-                                        
-                    if (this.shouldSkipFile(fileName, content)) {
+                    const fileHash = this.calculateHash(content);
+
+                    // Check if file needs indexing
+                    const shouldIndex = await this.kbManager.shouldIndexFile(
+                        file.fsPath,
+                        stats.mtimeMs,
+                        fileHash
+                    );
+
+                    if (!shouldIndex) {
+                        filesSkipped++;
+                        progress.report({
+                            message: `⏭️  Skipped (unchanged): ${relativePath}`,
+                            increment: (1 / allFiles.length) * 100
+                        });
                         continue;
                     }
 
-                    const snippets = this.extractSnippets(content, file.fsPath, language);
-                                        
-                    for (const snippet of snippets) {
-                        const fingerprint = this.createFingerprint(snippet.code);
+                    // Show which file is being indexed
+                    progress.report({
+                        message: `📄 Indexing: ${relativePath} (${i + 1}/${allFiles.length})`,
+                        increment: (1 / allFiles.length) * 100
+                    });
+
+                    const language = this.detectLanguage(file.fsPath);
+
+                    if (this.shouldSkipFile(fileName, content)) {
+                        filesSkipped++;
+                        continue;
+                    }
+
+                    // Parse file using appropriate AST parser
+                    let astNodes: ASTNode[] = [];
+
+                    if (language === 'java') {
+                        astNodes = this.javaParser.parse(content, file.fsPath);
+                    } else if (language === 'typescript') {
+                        astNodes = this.tsParser.parse(content, file.fsPath);
+                    } else if (language === 'javascript') {
+                        astNodes = this.jsParser.parse(content, file.fsPath);
+                    }
+
+                    // Group AST nodes into patterns and save
+                    const framework = this.detectFramework(content);
+                    const imports = this.extractImports(content, language);
+                    let filePatternsCount = 0;
+
+                    for (const node of astNodes) {
+                        // Skip if no code
+                        if (!node.code || node.code.trim().length < 100) {
+                            continue;
+                        }
+
+                        // Create fingerprint for deduplication
+                        const fingerprint = this.createFingerprint(node.code);
                         if (seenPatterns.has(fingerprint)) {
                             continue;
                         }
                         seenPatterns.add(fingerprint);
 
+                        // Detect patterns in the code
+                        const detectedPatterns = this.detectPatterns(node.code, language);
+
+                        // Build tags
+                        const tags = [
+                            'ingested',
+                            language,
+                            node.type.toLowerCase(),
+                            ...imports.slice(0, 3),
+                            ...detectedPatterns,
+                            ...(framework ? [framework] : [])
+                        ];
+
+                        // Save pattern with AST node
                         await this.kbManager.savePattern({
-                            name: snippet.name,
+                            name: node.identifier,
                             language: language,
-                            code: snippet.code,
-                            description: snippet.description,
-                            query: snippet.tags.join(' '),
-                            tags: snippet.tags,
+                            code: node.code,
+                            description: `${node.type} from ${path.basename(file.fsPath)}: ${node.signature || node.identifier}`,
+                            query: tags.join(' '),
+                            tags: [...new Set(tags)],
                             metadata: {
                                 filePath: file.fsPath,
-                                framework: snippet.framework,
-                                category: snippet.category
+                                framework: framework,
+                                category: this.categorizeCode(node.code, language)
                             }
-                        });
+                        }, [node]); // Pass AST node for indexing
+
                         patternsSaved++;
+                        astNodesSaved++;
+                        filePatternsCount++;
                     }
+
+                    // Mark file as indexed
+                    await this.kbManager.markFileAsIndexed(
+                        file.fsPath,
+                        stats.mtimeMs,
+                        fileHash,
+                        filePatternsCount
+                    );
+
+                    filesProcessed++;
+
                 } catch (e) {
                     console.warn(`Could not parse ${file.fsPath}: ${e}`);
                 }
             }
-            vscode.window.showInformationMessage(
-                `✅ Indexed ${patternsSaved} patterns from ${allFiles.length} files!`
-            );
+
+            const message = filesSkipped > 0
+                ? `✅ Indexed ${patternsSaved} patterns from ${filesProcessed} files! Skipped ${filesSkipped} unchanged files.`
+                : `✅ Indexed ${patternsSaved} patterns with ${astNodesSaved} AST nodes from ${filesProcessed} files!`;
+
+            vscode.window.showInformationMessage(message);
         });
+    }
+
+    /**
+     * Calculate SHA-256 hash of content for change detection
+     */
+    private calculateHash(content: string): string {
+        return crypto.createHash('sha256').update(content).digest('hex');
     }
 
     private detectLanguage(filePath: string): string {
@@ -93,26 +190,22 @@ export class IngestionService {
             '.ts': 'typescript',
             '.tsx': 'typescript',
             '.js': 'javascript',
-            '.jsx': 'javascript',
-            '.py': 'python',
-            '.go': 'go',
-            '.rs': 'rust',
-            '.proto': 'protobuf'
+            '.jsx': 'javascript'
         };
         return langMap[ext] || 'text';
     }
 
     private shouldSkipFile(fileName: string, content: string): boolean {
         const lowerFileName = fileName.toLowerCase();
-                
-        if (lowerFileName.includes('test') || 
+
+        if (lowerFileName.includes('test') ||
             lowerFileName.includes('spec') ||
             lowerFileName.includes('.min.') ||
             lowerFileName.includes('.bundle.')) {
             return true;
         }
-                
-        if (content.includes('@Generated') || 
+
+        if (content.includes('@Generated') ||
             content.includes('// AUTO-GENERATED') ||
             content.includes('/* eslint-disable */') ||
             content.includes('# Generated by')) {
@@ -122,62 +215,38 @@ export class IngestionService {
         if (content.length < 200) {
             return true;
         }
-                
+
         return false;
     }
 
-    private extractSnippets(content: string, filePath: string, language: string): Array<{
-        name: string;
-        code: string;
-        description: string;
-        tags: string[];
-        framework?: string;
-        category?: string;
-    }> {
-        const snippets = [];
-        const fileName = path.basename(filePath, path.extname(filePath));
-
-        const framework = this.detectFramework(content);
-        const imports = this.extractImports(content, language);
-        const blocks = this.extractCodeBlocks(content, language);
-
-        for (const block of blocks) {
-            if (block.code.split('\n').length < 5) continue;
-
-            const detectedPatterns = this.detectPatterns(block.code, language);
-            if (detectedPatterns.length === 0) continue;
-
-            const tags = [
-                'ingested',
-                language,
-                ...imports.slice(0, 3),
-                ...detectedPatterns,
-                ...(framework ? [framework] : [])
-            ];
-
-            snippets.push({
-                name: block.name || `${fileName} Pattern`,
-                code: block.code,
-                description: `Example from ${path.basename(filePath)}: ${block.description}`,
-                tags: [...new Set(tags)],
-                framework: framework,
-                category: this.categorizeCode(block.code, language)
-            });
-        }
-
-        return snippets;
-    }
-
     private detectFramework(content: string): string | undefined {
-        if (content.includes('@RestController') || content.includes('@Controller')) return 'spring-boot';
-        if (content.includes('io.grpc')) return 'grpc';
-        if (content.includes('from "react"') || content.includes('from \'react\'')) return 'react';
-        if (content.includes('@angular/core')) return 'angular';
-        if (content.includes('express')) return 'express';
-        if (content.includes('nestjs')) return 'nestjs';
-        if (content.includes('from flask')) return 'flask';
-        if (content.includes('from django')) return 'django';
-        if (content.includes('from fastapi')) return 'fastapi';
+        if (content.includes('@RestController') || content.includes('@Controller')) {
+            return 'spring-boot';
+        }
+        if (content.includes('io.grpc')) {
+            return 'grpc';
+        }
+        if (content.includes('from "react"') || content.includes('from \'react\'')) {
+            return 'react';
+        }
+        if (content.includes('@angular/core')) {
+            return 'angular';
+        }
+        if (content.includes('express')) {
+            return 'express';
+        }
+        if (content.includes('nestjs')) {
+            return 'nestjs';
+        }
+        if (content.includes('from flask')) {
+            return 'flask';
+        }
+        if (content.includes('from django')) {
+            return 'django';
+        }
+        if (content.includes('from fastapi')) {
+            return 'fastapi';
+        }
         return undefined;
     }
 
@@ -196,183 +265,77 @@ export class IngestionService {
                 const pkg = match[1].replace(/^[@./]/, '').split('/')[0];
                 imports.push(pkg);
             }
-        } else if (language === 'python') {
-            const matches = content.matchAll(/(?:from|import)\s+([\w.]+)/g);
-            for (const match of matches) {
-                imports.push(match[1].split('.')[0]);
-            }
         }
 
         return [...new Set(imports)];
     }
 
-    private extractCodeBlocks(content: string, language: string): Array<{
-        name: string;
-        code: string;
-        description: string;
-    }> {
-        const blocks = [];
-        const lines = content.split('\n');
-
-        if (language === 'java' || language === 'typescript' || language === 'javascript') {
-            const methods = this.findMethods(lines, language);
-            for (const method of methods) {
-                const methodCode = lines.slice(method.start, method.end).join('\n');
-                blocks.push({
-                    name: `${method.name} Example`,
-                    code: methodCode,
-                    description: `Method: ${method.name}`
-                });
-            }
-        } else if (language === 'python') {
-            const funcs = this.findPythonFunctions(lines);
-            for (const func of funcs) {
-                const funcCode = lines.slice(func.start, func.end).join('\n');
-                blocks.push({
-                    name: `${func.name} Example`,
-                    code: funcCode,
-                    description: `Function: ${func.name}`
-                });
-            }
-        } else if (language === 'protobuf') {
-            blocks.push({
-                name: 'Protocol Buffer Definition',
-                code: content,
-                description: 'gRPC service or message definition'
-            });
-        }
-
-        return blocks;
-    }
-
-    private findMethods(lines: string[], language: string): Array<{
-        name: string;
-        start: number;
-        end: number;
-    }> {
-        const methods = [];
-        let currentMethod: { name: string; start: number; end: number } | null = null;
-        let braceCount = 0;
-
-        const methodRegex = language === 'java'
-            ? /(private|public|protected)\s+[\w<>[\]]+\s+(\w+)\s*\(/
-            : /(?:function|const|let|var)?\s*(\w+)\s*[=:]?\s*(?:async\s*)?\(?[\w,\s]*\)?\s*(?:=>)?\s*{/;
-
-        for (let i = 0; i < lines.length; i++) {
-            const line = lines[i];
-            const trimmedLine = line.trim();
-            
-            if (!currentMethod) {
-                const match = trimmedLine.match(methodRegex);
-                if (match) {
-                    currentMethod = {
-                        name: match[2] || match[1],
-                        start: i,
-                        end: -1
-                    };
-                    braceCount = 0;
-                }
-            }
-            
-            if (currentMethod) {
-                const openBraces = (line.match(/{/g) || []).length;
-                const closeBraces = (line.match(/}/g) || []).length;
-                braceCount += openBraces - closeBraces;
-                
-                if (braceCount === 0 && currentMethod.start !== i) {
-                    currentMethod.end = i + 1;
-                    
-                    const methodLength = currentMethod.end - currentMethod.start;
-                    if (methodLength > 5 && methodLength < 100) {
-                        methods.push(currentMethod);
-                    }
-                    currentMethod = null;
-                }
-            }
-        }
-        return methods;
-    }
-
-    private findPythonFunctions(lines: string[]): Array<{
-        name: string;
-        start: number;
-        end: number;
-    }> {
-        const functions = [];
-        let currentFunc: { name: string; start: number; end: number; indent: number } | null = null;
-
-        for (let i = 0; i < lines.length; i++) {
-            const line = lines[i];
-            const indent = line.search(/\S/);
-            
-            if (line.trim().startsWith('def ')) {
-                const match = line.match(/def\s+(\w+)\s*\(/);
-                if (match) {
-                    if (currentFunc) {
-                        currentFunc.end = i;
-                        functions.push(currentFunc);
-                    }
-                    currentFunc = {
-                        name: match[1],
-                        start: i,
-                        end: -1,
-                        indent: indent
-                    };
-                }
-            } else if (currentFunc && indent <= currentFunc.indent && line.trim().length > 0) {
-                currentFunc.end = i;
-                functions.push(currentFunc);
-                currentFunc = null;
-            }
-        }
-
-        if (currentFunc) {
-            currentFunc.end = lines.length;
-            functions.push(currentFunc);
-        }
-
-        return functions.filter(f => (f.end - f.start) > 5 && (f.end - f.start) < 100);
-    }
-
     private detectPatterns(code: string, language: string): string[] {
         const patterns = [];
 
-        if (code.includes('async') || code.includes('await')) patterns.push('async');
-        if (code.includes('Promise') || code.includes('Future')) patterns.push('promise');
-        if (code.includes('try') && code.includes('catch')) patterns.push('error-handling');
-        
+        if (code.includes('async') || code.includes('await')) {
+            patterns.push('async');
+        }
+        if (code.includes('Promise') || code.includes('Future')) {
+            patterns.push('promise');
+        }
+        if (code.includes('try') && code.includes('catch')) {
+            patterns.push('error-handling');
+        }
+
         if (language === 'java') {
-            if (code.includes('@Override')) patterns.push('override');
-            if (code.includes('@Autowired')) patterns.push('dependency-injection');
-            if (code.includes('Stream.')) patterns.push('stream-api');
+            if (code.includes('@Override')) {
+                patterns.push('override');
+            }
+            if (code.includes('@Autowired')) {
+                patterns.push('dependency-injection');
+            }
+            if (code.includes('Stream.')) {
+                patterns.push('stream-api');
+            }
         }
-        
+
         if (language === 'typescript' || language === 'javascript') {
-            if (code.includes('useState') || code.includes('useEffect')) patterns.push('react-hooks');
-            if (code.includes('.map(') || code.includes('.filter(')) patterns.push('functional');
-            if (code.includes('interface') || code.includes('type')) patterns.push('types');
+            if (code.includes('useState') || code.includes('useEffect')) {
+                patterns.push('react-hooks');
+            }
+            if (code.includes('.map(') || code.includes('.filter(')) {
+                patterns.push('functional');
+            }
+            if (code.includes('interface') || code.includes('type')) {
+                patterns.push('types');
+            }
         }
 
-        if (language === 'python') {
-            if (code.includes('@decorator') || code.match(/@\w+/)) patterns.push('decorator');
-            if (code.includes('with ')) patterns.push('context-manager');
-            if (code.includes('yield')) patterns.push('generator');
+        if (code.includes('grpc') || code.includes('rpc ')) {
+            patterns.push('grpc');
         }
-
-        if (code.includes('grpc') || code.includes('rpc ')) patterns.push('grpc');
-        if (code.includes('message ') && language === 'protobuf') patterns.push('protobuf-message');
 
         return patterns;
     }
 
-    private categorizeCode(code: string, language: string): string {
-        if (code.includes('server') || code.includes('listen') || code.includes('bind')) return 'server';
-        if (code.includes('rpc') || code.includes('grpc')) return 'grpc';
-        if (code.includes('http') || code.includes('router') || code.includes('@Get') || code.includes('@Post')) return 'api';
-        if (code.includes('render') || code.includes('component') || code.includes('jsx')) return 'ui';
-        if (code.includes('useState') || code.includes('useEffect')) return 'react-component';
-        if (code.includes('repository') || code.includes('database') || code.includes('query')) return 'data';
-        if (code.includes('util') || code.includes('helper')) return 'utility';
+    private categorizeCode(code: string, _language: string): string {
+        if (code.includes('server') || code.includes('listen') || code.includes('bind')) {
+            return 'server';
+        }
+        if (code.includes('rpc') || code.includes('grpc')) {
+            return 'grpc';
+        }
+        if (code.includes('http') || code.includes('router') || code.includes('@Get') || code.includes('@Post')) {
+            return 'api';
+        }
+        if (code.includes('render') || code.includes('component') || code.includes('jsx')) {
+            return 'ui';
+        }
+        if (code.includes('useState') || code.includes('useEffect')) {
+            return 'react-component';
+        }
+        if (code.includes('repository') || code.includes('database') || code.includes('query')) {
+            return 'data';
+        }
+        if (code.includes('util') || code.includes('helper')) {
+            return 'utility';
+        }
         return 'general';
     }
 
@@ -384,7 +347,7 @@ export class IngestionService {
             .replace(/[0-9]+/g, 'N')
             .replace(/\/\/.*/g, '')
             .replace(/\/\*[\s\S]*?\*\//g, '');
-        
+
         return normalized.substring(0, 500) + '::' + methodNames;
     }
 }
