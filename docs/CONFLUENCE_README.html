@@ -1,0 +1,680 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>OpenCat - AI-Powered Code Generation Assistant</title>
+    <style>
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif; line-height: 1.6; max-width: 900px; margin: 0 auto; padding: 20px; color: #333; }
+        h1 { color: #0052CC; border-bottom: 2px solid #0052CC; padding-bottom: 10px; }
+        h2 { color: #172B4D; margin-top: 30px; border-bottom: 1px solid #DFE1E6; padding-bottom: 8px; }
+        h3 { color: #253858; margin-top: 25px; }
+        table { border-collapse: collapse; width: 100%; margin: 15px 0; }
+        th, td { border: 1px solid #DFE1E6; padding: 10px 12px; text-align: left; }
+        th { background-color: #F4F5F7; font-weight: 600; }
+        tr:nth-child(even) { background-color: #FAFBFC; }
+        code { background-color: #F4F5F7; padding: 2px 6px; border-radius: 3px; font-family: 'SFMono-Regular', Consolas, monospace; font-size: 0.9em; }
+        pre { background-color: #F4F5F7; padding: 15px; border-radius: 5px; overflow-x: auto; border: 1px solid #DFE1E6; }
+        pre code { background: none; padding: 0; }
+        .info-panel { background-color: #DEEBFF; border-left: 4px solid #0052CC; padding: 15px; margin: 15px 0; border-radius: 0 3px 3px 0; }
+        .success-panel { background-color: #E3FCEF; border-left: 4px solid #00875A; padding: 15px; margin: 15px 0; border-radius: 0 3px 3px 0; }
+        .warning-panel { background-color: #FFFAE6; border-left: 4px solid #FF991F; padding: 15px; margin: 15px 0; border-radius: 0 3px 3px 0; }
+        .architecture-box { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 20px; border-radius: 8px; margin: 20px 0; }
+        .architecture-box h4 { margin-top: 0; color: white; }
+        .flow-step { display: flex; align-items: center; margin: 10px 0; }
+        .flow-number { background: white; color: #667eea; width: 30px; height: 30px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-weight: bold; margin-right: 15px; flex-shrink: 0; }
+        .flow-arrow { text-align: center; color: #667eea; font-size: 20px; margin: 5px 0; }
+        .comparison-good { color: #00875A; }
+        .comparison-bad { color: #DE350B; }
+        .comparison-warn { color: #FF991F; }
+        .feature-card { border: 1px solid #DFE1E6; border-radius: 8px; padding: 15px; margin: 10px 0; background: #FAFBFC; }
+        .feature-card h4 { margin-top: 0; color: #0052CC; }
+        ul { padding-left: 25px; }
+        li { margin: 5px 0; }
+    </style>
+</head>
+<body>
+
+<h1>OpenCat - AI-Powered Code Generation Assistant</h1>
+
+<div class="info-panel">
+    <strong>Version 0.2.0</strong> | VS Code Extension | Fully Air-Gapped<br>
+    OpenCat bridges GitHub Copilot with your company's code patterns for context-aware code generation.
+</div>
+
+<h2>Table of Contents</h2>
+<ol>
+    <li><a href="#overview">Overview</a></li>
+    <li><a href="#architecture">Architecture & Techniques</a></li>
+    <li><a href="#comparison">OpenCat vs Pure LLM Approach</a></li>
+    <li><a href="#features">Features</a></li>
+    <li><a href="#installation">Installation & Setup</a></li>
+    <li><a href="#usage">Usage Guide</a></li>
+    <li><a href="#languages">Supported Languages</a></li>
+    <li><a href="#configuration">Configuration</a></li>
+</ol>
+
+<h2 id="overview">1. Overview</h2>
+
+<h3>The Problem</h3>
+<p>Modern LLMs like GPT-4 and Claude are powerful but have limitations in enterprise settings:</p>
+<ul>
+    <li><strong>No knowledge of internal patterns</strong> - They don't know your company's coding standards</li>
+    <li><strong>Inconsistent output</strong> - Same prompt can yield different implementations</li>
+    <li><strong>External API dependency</strong> - Security concerns with sending code to external services</li>
+    <li><strong>No learning from feedback</strong> - They don't improve from your corrections</li>
+</ul>
+
+<h3>The Solution</h3>
+<p>OpenCat creates a <strong>local knowledge base</strong> of your company's proven code patterns and uses them to guide GitHub Copilot's generation.</p>
+
+<div class="architecture-box">
+    <h4>OpenCat Architecture Flow</h4>
+    <div class="flow-step"><div class="flow-number">1</div><div><strong>Developer Query</strong><br>"Create AG Grid with row styling"</div></div>
+    <div class="flow-arrow">&#8595;</div>
+    <div class="flow-step"><div class="flow-number">2</div><div><strong>Hybrid Search Engine</strong><br>AST Search (50%) + BM25 Search (30%) + Fuzzy Match (20%)</div></div>
+    <div class="flow-arrow">&#8595;</div>
+    <div class="flow-step"><div class="flow-number">3</div><div><strong>Context Builder</strong><br>Enriches prompt with matching patterns from Knowledge Base</div></div>
+    <div class="flow-arrow">&#8595;</div>
+    <div class="flow-step"><div class="flow-number">4</div><div><strong>GitHub Copilot</strong><br>Generates code following your company's patterns</div></div>
+    <div class="flow-arrow">&#8595;</div>
+    <div class="flow-step"><div class="flow-number">5</div><div><strong>Generated Code</strong><br>Consistent with company standards</div></div>
+</div>
+
+<h2 id="architecture">2. Architecture & Techniques</h2>
+
+<h3>2.1 Hybrid Search Engine</h3>
+<p>OpenCat combines three search strategies for optimal results:</p>
+
+<table>
+    <tr>
+        <th>Strategy</th>
+        <th>Weight</th>
+        <th>Description</th>
+        <th>Best For</th>
+    </tr>
+    <tr>
+        <td><strong>AST Search</strong></td>
+        <td>50%</td>
+        <td>Searches code structure (classes, methods, functions)</td>
+        <td>Finding specific implementations</td>
+    </tr>
+    <tr>
+        <td><strong>BM25 Search</strong></td>
+        <td>30%</td>
+        <td>Text relevance ranking algorithm</td>
+        <td>Natural language queries</td>
+    </tr>
+    <tr>
+        <td><strong>Fuzzy Match</strong></td>
+        <td>20%</td>
+        <td>Levenshtein distance matching</td>
+        <td>Typos, partial names</td>
+    </tr>
+</table>
+
+<div class="info-panel">
+    <strong>Example:</strong> Query "row styling for grid"<br><br>
+    <strong>AST Search finds:</strong> <code>getRowClass()</code>, <code>applyRowStyling()</code><br>
+    <strong>BM25 Search finds:</strong> Patterns mentioning "row", "styling", "grid"<br>
+    <strong>Fuzzy Match finds:</strong> <code>rowStyle</code>, <code>gridStyle</code>, <code>styleRow</code><br><br>
+    Results are combined with weighted scores for best matches.
+</div>
+
+<h3>2.2 Abstract Syntax Tree (AST) Parsing</h3>
+<p>Instead of treating code as text, OpenCat <strong>understands code structure</strong>:</p>
+
+<table>
+    <tr>
+        <th>Language</th>
+        <th>Parser</th>
+        <th>Extracts</th>
+    </tr>
+    <tr>
+        <td>Java</td>
+        <td>java-parser</td>
+        <td>Classes, methods, interfaces, annotations</td>
+    </tr>
+    <tr>
+        <td>TypeScript/JavaScript</td>
+        <td>@babel/parser</td>
+        <td>Functions, classes, React components, hooks</td>
+    </tr>
+    <tr>
+        <td>Protocol Buffers</td>
+        <td>Custom regex</td>
+        <td>Services, RPC methods, messages</td>
+    </tr>
+</table>
+
+<p><strong>Benefits:</strong></p>
+<ul>
+    <li>Find "all methods that return UserResponse"</li>
+    <li>Search by signature, not just name</li>
+    <li>Understand inheritance and interfaces</li>
+</ul>
+
+<h3>2.3 BM25 Ranking Algorithm</h3>
+<p><strong>BM25 (Best Matching 25)</strong> is an industry-standard ranking algorithm used by search engines like Elasticsearch.</p>
+
+<div class="info-panel">
+    <strong>Why BM25 over simple text search:</strong>
+    <ul>
+        <li>Handles document length normalization</li>
+        <li>Rare terms get higher weight (IDF)</li>
+        <li>Balances term frequency saturation</li>
+    </ul>
+</div>
+
+<h3>2.4 Cross-Language Feature Tracking</h3>
+<p>For complex architectures (e.g., SDUI with gRPC), OpenCat traces features across the entire stack:</p>
+
+<table>
+    <tr>
+        <th>Stage</th>
+        <th>Layer</th>
+        <th>File</th>
+        <th>Details</th>
+    </tr>
+    <tr>
+        <td><strong>1. Trigger</strong></td>
+        <td>TypeScript</td>
+        <td>LayoutManager.tsx</td>
+        <td><code>handleRowSelected()</code> calls <code>client.sendUserEvent(event)</code></td>
+    </tr>
+    <tr>
+        <td><strong>2. Definition</strong></td>
+        <td>gRPC Proto</td>
+        <td>layout.proto</td>
+        <td><code>rpc SendUserEvent(UserEvent) returns (LayoutResponse)</code></td>
+    </tr>
+    <tr>
+        <td><strong>3. Implementation</strong></td>
+        <td>Java</td>
+        <td>LayoutController.java</td>
+        <td><code>handleUserEvent()</code> with @Service, @Transactional</td>
+    </tr>
+    <tr>
+        <td><strong>4. UI Update</strong></td>
+        <td>TypeScript</td>
+        <td>LayoutManager.tsx</td>
+        <td><code>setLayout(response.layout)</code></td>
+    </tr>
+</table>
+
+<h3>2.5 Incremental Indexing</h3>
+<p>OpenCat uses <strong>content hashing</strong> to avoid re-indexing unchanged files:</p>
+
+<pre><code>// File tracking in SQLite
+{
+  filePath: "src/UserService.java",
+  contentHash: "sha256:a1b2c3...",
+  lastIndexed: "2024-01-15T10:30:00Z",
+  nodeCount: 12
+}
+
+// On re-index:
+// 1. Calculate current hash
+// 2. Compare with stored hash
+// 3. Skip if unchanged, re-index if different</code></pre>
+
+<h2 id="comparison">3. OpenCat vs Pure LLM Approach</h2>
+
+<h3>3.1 Comparison Matrix</h3>
+
+<table>
+    <tr>
+        <th>Aspect</th>
+        <th>Pure LLM (GPT-4/Claude)</th>
+        <th>OpenCat + Copilot</th>
+    </tr>
+    <tr>
+        <td><strong>Company Pattern Knowledge</strong></td>
+        <td class="comparison-bad">&#10060; None - must provide in every prompt</td>
+        <td class="comparison-good">&#9989; Learns and stores patterns locally</td>
+    </tr>
+    <tr>
+        <td><strong>Consistency</strong></td>
+        <td class="comparison-warn">&#9888; Variable - different outputs each time</td>
+        <td class="comparison-good">&#9989; Consistent - guided by known patterns</td>
+    </tr>
+    <tr>
+        <td><strong>Security</strong></td>
+        <td class="comparison-warn">&#9888; Code sent to external APIs</td>
+        <td class="comparison-good">&#9989; Fully local - air-gapped ready</td>
+    </tr>
+    <tr>
+        <td><strong>Context Window</strong></td>
+        <td class="comparison-warn">&#9888; Limited (8K-128K tokens)</td>
+        <td class="comparison-good">&#9989; Unlimited - indexed in local DB</td>
+    </tr>
+    <tr>
+        <td><strong>Learning</strong></td>
+        <td class="comparison-bad">&#10060; No memory between sessions</td>
+        <td class="comparison-good">&#9989; Patterns saved and improved over time</td>
+    </tr>
+    <tr>
+        <td><strong>Search Precision</strong></td>
+        <td class="comparison-warn">&#9888; Semantic only</td>
+        <td class="comparison-good">&#9989; Structural + Semantic + Fuzzy</td>
+    </tr>
+    <tr>
+        <td><strong>Cross-Language Tracing</strong></td>
+        <td class="comparison-bad">&#10060; Cannot trace flows</td>
+        <td class="comparison-good">&#9989; TypeScript &#8594; Proto &#8594; Java</td>
+    </tr>
+    <tr>
+        <td><strong>Cost</strong></td>
+        <td class="comparison-warn">&#128176; Per-token API costs</td>
+        <td class="comparison-good">&#9989; One-time Copilot license</td>
+    </tr>
+    <tr>
+        <td><strong>Latency</strong></td>
+        <td class="comparison-warn">&#9888; Network-dependent</td>
+        <td class="comparison-good">&#9989; Local search + Copilot</td>
+    </tr>
+    <tr>
+        <td><strong>Customization</strong></td>
+        <td class="comparison-warn">&#9888; Prompt engineering only</td>
+        <td class="comparison-good">&#9989; Indexed patterns + prompts</td>
+    </tr>
+</table>
+
+<h3>3.2 When to Use OpenCat</h3>
+
+<div class="success-panel">
+    <strong>Best for:</strong>
+    <ul>
+        <li>Enterprise codebases with established patterns</li>
+        <li>Air-gapped or high-security environments</li>
+        <li>Teams wanting consistent code generation</li>
+        <li>Complex architectures (microservices, gRPC, SDUI)</li>
+        <li>Onboarding developers to existing patterns</li>
+    </ul>
+</div>
+
+<div class="warning-panel">
+    <strong>Consider alternatives when:</strong>
+    <ul>
+        <li>Greenfield projects with no existing patterns</li>
+        <li>One-off code generation tasks</li>
+        <li>Exploratory/prototyping work</li>
+    </ul>
+</div>
+
+<h3>3.3 Key Advantages</h3>
+
+<div class="feature-card">
+    <h4>1. Pattern Reuse Over Regeneration</h4>
+    <p><strong>Pure LLM:</strong> "Create a Spring controller" &#8594; Generates generic controller</p>
+    <p><strong>OpenCat:</strong> "Create a Spring controller" &#8594; Finds your existing UserController, OrderController patterns &#8594; Generates controller matching your @Annotations, error handling, logging</p>
+</div>
+
+<div class="feature-card">
+    <h4>2. Institutional Memory</h4>
+    <p><strong>Day 1:</strong> Developer saves "AG Grid with row coloring" pattern</p>
+    <p><strong>Day 30:</strong> New developer asks "How do we style grid rows?" &#8594; OpenCat finds the pattern instantly &#8594; Copilot generates matching code</p>
+</div>
+
+<div class="feature-card">
+    <h4>3. Deterministic Search</h4>
+    <p><strong>LLM Search:</strong> Query "row styling" &#8594; Unpredictable results</p>
+    <p><strong>OpenCat Search:</strong> Query "row styling" &#8594;</p>
+    <ol>
+        <li><code>getRowClass()</code> method [AST: exact match]</li>
+        <li>"Row Styling Pattern" [BM25: text match]</li>
+        <li><code>rowStyle</code> function [Fuzzy: partial match]</li>
+    </ol>
+</div>
+
+<h3>3.4 Limitations & Trade-offs</h3>
+
+<table>
+    <tr>
+        <th>Limitation</th>
+        <th>Mitigation</th>
+    </tr>
+    <tr>
+        <td>Requires initial pattern indexing</td>
+        <td>One-time workspace scan (~30s for 1000 files)</td>
+    </tr>
+    <tr>
+        <td>Only as good as saved patterns</td>
+        <td>Learning loop improves patterns over time</td>
+    </tr>
+    <tr>
+        <td>Copilot dependency</td>
+        <td>Works offline once patterns are indexed</td>
+    </tr>
+    <tr>
+        <td>Language support limited</td>
+        <td>Extensible parser architecture (add new parsers)</td>
+    </tr>
+</table>
+
+<h2 id="features">4. Features</h2>
+
+<h3>4.1 Core Capabilities</h3>
+
+<table>
+    <tr>
+        <th>Feature</th>
+        <th>Description</th>
+    </tr>
+    <tr>
+        <td><strong>Pattern Search</strong></td>
+        <td>Hybrid AST + BM25 + Fuzzy search across your codebase</td>
+    </tr>
+    <tr>
+        <td><strong>Knowledge Base</strong></td>
+        <td>SQLite-powered local storage for patterns</td>
+    </tr>
+    <tr>
+        <td><strong>Chat Interface</strong></td>
+        <td>Natural language interaction in VS Code</td>
+    </tr>
+    <tr>
+        <td><strong>Pattern Browser</strong></td>
+        <td>Visual UI to browse, filter, and manage patterns</td>
+    </tr>
+    <tr>
+        <td><strong>Statistics</strong></td>
+        <td>Track patterns by language, tags, usage</td>
+    </tr>
+    <tr>
+        <td><strong>Learning Loop</strong></td>
+        <td>Save successful generations as new patterns</td>
+    </tr>
+</table>
+
+<h3>4.2 Pattern Browser</h3>
+<p>The Pattern Browser provides a visual interface to manage your knowledge base:</p>
+
+<table>
+    <tr>
+        <th>Feature</th>
+        <th>Description</th>
+    </tr>
+    <tr>
+        <td>Search</td>
+        <td>Text search across pattern names and tags</td>
+    </tr>
+    <tr>
+        <td>Filter by Feature</td>
+        <td>Dynamically populated from pattern tags</td>
+    </tr>
+    <tr>
+        <td>Filter by Language</td>
+        <td>Java, TypeScript, JavaScript, etc.</td>
+    </tr>
+    <tr>
+        <td>Sort Options</td>
+        <td>Most Recent, Name (A-Z), Language</td>
+    </tr>
+    <tr>
+        <td>Group by Feature</td>
+        <td>Organize patterns into feature categories</td>
+    </tr>
+    <tr>
+        <td>Actions</td>
+        <td>View, Use in Chat, Delete</td>
+    </tr>
+</table>
+
+<h2 id="installation">5. Installation & Setup</h2>
+
+<h3>5.1 Prerequisites</h3>
+<ul>
+    <li>VS Code 1.90.0 or higher</li>
+    <li>GitHub Copilot extension (licensed)</li>
+    <li>Node.js 18+ (for development only)</li>
+</ul>
+
+<h3>5.2 Installation Steps</h3>
+<ol>
+    <li><strong>Download</strong> the VSIX package: <code>codebase-assistant-0.2.0.vsix</code></li>
+    <li><strong>Open VS Code</strong> Extensions panel (<code>Ctrl+Shift+X</code>)</li>
+    <li><strong>Click</strong> <code>...</code> &#8594; <code>Install from VSIX...</code></li>
+    <li><strong>Select</strong> the downloaded file</li>
+    <li><strong>Reload</strong> VS Code</li>
+    <li><strong>Verify:</strong> Command Palette &#8594; <code>OpenCat: Show KB Stats</code></li>
+</ol>
+
+<h3>5.3 Initial Setup</h3>
+<ol>
+    <li><strong>Index your workspace:</strong> Command Palette &#8594; <code>OpenCat: Index Workspace</code></li>
+    <li><strong>Open the chat panel:</strong> Command Palette &#8594; <code>OpenCat: Open Chat</code></li>
+    <li><strong>Start asking questions:</strong> "How do we implement row styling in AG Grid?"</li>
+</ol>
+
+<h2 id="usage">6. Usage Guide</h2>
+
+<h3>6.1 Basic Workflow</h3>
+
+<table>
+    <tr>
+        <th>Step</th>
+        <th>Action</th>
+        <th>Description</th>
+    </tr>
+    <tr>
+        <td>1. INDEX</td>
+        <td>Scan workspace</td>
+        <td>Build knowledge base from existing code</td>
+    </tr>
+    <tr>
+        <td>2. SEARCH</td>
+        <td>Ask questions</td>
+        <td>Find relevant patterns</td>
+    </tr>
+    <tr>
+        <td>3. GENERATE</td>
+        <td>Use Copilot</td>
+        <td>Generate code using patterns as context</td>
+    </tr>
+    <tr>
+        <td>4. SAVE</td>
+        <td>Save good code</td>
+        <td>Add successful generations as new patterns</td>
+    </tr>
+    <tr>
+        <td>5. IMPROVE</td>
+        <td>Iterate</td>
+        <td>Patterns get better over time</td>
+    </tr>
+</table>
+
+<h3>6.2 Example Queries</h3>
+
+<table>
+    <tr>
+        <th>Query</th>
+        <th>What OpenCat Does</th>
+    </tr>
+    <tr>
+        <td>"Create a REST controller for products"</td>
+        <td>Finds existing controllers, matches annotations and style</td>
+    </tr>
+    <tr>
+        <td>"AG Grid with custom row styling"</td>
+        <td>Finds AG Grid patterns, row class implementations</td>
+    </tr>
+    <tr>
+        <td>"How does the payment flow work?"</td>
+        <td>Traces across TS &#8594; gRPC &#8594; Java</td>
+    </tr>
+    <tr>
+        <td>"WebSocket reconnection logic"</td>
+        <td>Finds WebSocket patterns with error handling</td>
+    </tr>
+</table>
+
+<h3>6.3 Saving Patterns</h3>
+<p>After Copilot generates code:</p>
+<ol>
+    <li>Click <strong>Save Pattern</strong> button</li>
+    <li>Fill in:
+        <ul>
+            <li><strong>Name:</strong> Descriptive name (e.g., "AG Grid Row Styling")</li>
+            <li><strong>Description:</strong> What it does</li>
+            <li><strong>Tags:</strong> Comma-separated (e.g., "ag-grid, styling, java")</li>
+        </ul>
+    </li>
+    <li>Click <strong>Save</strong></li>
+</ol>
+
+<h2 id="languages">7. Supported Languages</h2>
+
+<table>
+    <tr>
+        <th>Language</th>
+        <th>Parser</th>
+        <th>Extracts</th>
+    </tr>
+    <tr>
+        <td><strong>Java</strong></td>
+        <td>java-parser</td>
+        <td>Classes, methods, interfaces, enums, annotations</td>
+    </tr>
+    <tr>
+        <td><strong>TypeScript</strong></td>
+        <td>@babel/parser</td>
+        <td>Functions, classes, interfaces, React components</td>
+    </tr>
+    <tr>
+        <td><strong>JavaScript</strong></td>
+        <td>@babel/parser</td>
+        <td>Functions, classes, ES6 modules</td>
+    </tr>
+    <tr>
+        <td><strong>JSX/TSX</strong></td>
+        <td>@babel/parser</td>
+        <td>React components, hooks, JSX elements</td>
+    </tr>
+    <tr>
+        <td><strong>Protocol Buffers</strong></td>
+        <td>Custom</td>
+        <td>Services, RPC methods, messages, fields</td>
+    </tr>
+</table>
+
+<h3>Framework Detection</h3>
+<ul>
+    <li><strong>Java:</strong> Spring Boot, gRPC</li>
+    <li><strong>TypeScript/JavaScript:</strong> React, Angular, Express, NestJS</li>
+    <li><strong>Python:</strong> Flask, Django, FastAPI (detection only)</li>
+</ul>
+
+<h2 id="configuration">8. Configuration</h2>
+
+<h3>8.1 VS Code Settings</h3>
+
+<pre><code>{
+  "opencat.framework.language": "java",
+  "opencat.framework.types": ["server", "grpc", "api"],
+  "opencat.ingestion.include": ["**/*.java", "**/*.ts", "**/*.tsx"]
+}</code></pre>
+
+<h3>8.2 Search Tuning</h3>
+
+<table>
+    <tr>
+        <th>Parameter</th>
+        <th>Default</th>
+        <th>Description</th>
+    </tr>
+    <tr>
+        <td>AST Weight</td>
+        <td>0.5</td>
+        <td>Structural matching importance</td>
+    </tr>
+    <tr>
+        <td>BM25 Weight</td>
+        <td>0.3</td>
+        <td>Text relevance importance</td>
+    </tr>
+    <tr>
+        <td>Fuzzy Weight</td>
+        <td>0.2</td>
+        <td>Approximate matching importance</td>
+    </tr>
+    <tr>
+        <td>Identifier Boost</td>
+        <td>3.0x</td>
+        <td>Method/class names priority</td>
+    </tr>
+    <tr>
+        <td>Tags Boost</td>
+        <td>1.5x</td>
+        <td>Pattern tags priority</td>
+    </tr>
+</table>
+
+<h2>9. Technical Specifications</h2>
+
+<h3>9.1 Database Schema (SQLite/sql.js)</h3>
+
+<table>
+    <tr>
+        <th>Table</th>
+        <th>Purpose</th>
+    </tr>
+    <tr>
+        <td><code>patterns</code></td>
+        <td>Stored code patterns with metadata</td>
+    </tr>
+    <tr>
+        <td><code>ast_nodes</code></td>
+        <td>Indexed AST nodes (classes, methods, functions)</td>
+    </tr>
+    <tr>
+        <td><code>term_index</code></td>
+        <td>BM25 inverted index</td>
+    </tr>
+    <tr>
+        <td><code>doc_stats</code></td>
+        <td>Document length statistics</td>
+    </tr>
+    <tr>
+        <td><code>indexed_files</code></td>
+        <td>File tracking with content hashes</td>
+    </tr>
+</table>
+
+<h3>9.2 Performance</h3>
+
+<table>
+    <tr>
+        <th>Operation</th>
+        <th>Typical Time</th>
+    </tr>
+    <tr>
+        <td>Index 1,000 files</td>
+        <td>~30 seconds</td>
+    </tr>
+    <tr>
+        <td>Search query</td>
+        <td>&lt;100ms</td>
+    </tr>
+    <tr>
+        <td>Pattern save</td>
+        <td>&lt;50ms</td>
+    </tr>
+    <tr>
+        <td>Full KB stats</td>
+        <td>&lt;200ms</td>
+    </tr>
+</table>
+
+<h3>9.3 Memory Usage</h3>
+<ul>
+    <li>SQLite database: ~1MB per 1,000 patterns</li>
+    <li>In-memory during search: ~50MB typical</li>
+    <li>No persistent background processes</li>
+</ul>
+
+<hr>
+
+<p><em>Built with TypeScript, sql.js, and VS Code Extension API</em></p>
+
+</body>
+</html>
