@@ -2,7 +2,7 @@
   "name": "opencat",
   "displayName": "OpenCat",
   "description": "AI code assistant with company knowledge",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "publisher": "your-company",
   "engines": {
     "vscode": "^1.90.0"
@@ -64,7 +64,7 @@
       "opencat": [
         {
           "type": "webview",
-          "id": "opencat.chatView",
+          "id": "opencat.chatViewV2",
           "name": "Chat",
           "icon": "media/icon.svg"
         }
@@ -86,6 +86,10 @@
       {
         "command": "opencat.ingestWorkspace",
         "title": "OpenCat: Index Workspace"
+      },
+      {
+        "command": "opencat.resetKnowledgeBase",
+        "title": "OpenCat: Reset Knowledge Base"
       }
     ]
   },

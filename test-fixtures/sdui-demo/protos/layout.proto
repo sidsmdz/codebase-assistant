@@ -1,0 +1,118 @@
+syntax = "proto3";
+
+package sdui;
+
+// Layout Service - Server-driven UI controller
+service LayoutService {
+    // Initial layout request when app loads
+    rpc GetInitialLayout(LayoutRequest) returns (LayoutResponse);
+
+    // Server streams layout updates to client
+    rpc StreamLayoutUpdates(LayoutRequest) returns (stream LayoutUpdate);
+
+    // Client sends user events (clicks, selections, etc.)
+    rpc SendUserEvent(UserEvent) returns (LayoutResponse);
+}
+
+// Request for layout
+message LayoutRequest {
+    string userId = 1;
+    string sessionId = 2;
+    string context = 3;
+}
+
+// Layout response with UI components
+message LayoutResponse {
+    string layoutId = 1;
+    repeated Component components = 2;
+    string theme = 3;
+    bool success = 4;
+}
+
+// Streaming layout update
+message LayoutUpdate {
+    string updateId = 1;
+    UpdateType type = 2;
+    repeated Component components = 3;
+    string targetTab = 4;
+}
+
+enum UpdateType {
+    FULL_REFRESH = 0;
+    PARTIAL_UPDATE = 1;
+    TAB_CHANGE = 2;
+    COMPONENT_ADD = 3;
+    COMPONENT_REMOVE = 4;
+}
+
+// User event from client
+message UserEvent {
+    string eventId = 1;
+    EventType type = 2;
+    string componentId = 3;
+    map<string, string> data = 4;
+    int64 timestamp = 5;
+}
+
+enum EventType {
+    BUTTON_CLICK = 0;
+    ROW_SELECTED = 1;
+    TAB_CHANGED = 2;
+    FORM_SUBMITTED = 3;
+    GRID_FILTER = 4;
+}
+
+// Component definition
+message Component {
+    string id = 1;
+    ComponentType type = 2;
+    map<string, string> props = 3;
+    repeated Component children = 4;
+    GridConfig gridConfig = 5;
+    TabConfig tabConfig = 6;
+}
+
+enum ComponentType {
+    CONTAINER = 0;
+    BUTTON = 1;
+    AG_GRID = 2;
+    TABS = 3;
+    TAB_PANEL = 4;
+    TEXT = 5;
+    FORM = 6;
+}
+
+// AG Grid configuration
+message GridConfig {
+    repeated ColumnDef columns = 1;
+    repeated Row rows = 2;
+    bool pagination = 3;
+    int32 pageSize = 4;
+    string rowSelection = 5;
+}
+
+message ColumnDef {
+    string field = 1;
+    string headerName = 2;
+    bool sortable = 3;
+    bool filter = 4;
+    int32 width = 5;
+}
+
+message Row {
+    string id = 1;
+    map<string, string> data = 2;
+    string rowClass = 3;
+}
+
+// Tab configuration
+message TabConfig {
+    repeated Tab tabs = 1;
+    int32 activeTab = 2;
+}
+
+message Tab {
+    string id = 1;
+    string label = 2;
+    repeated Component content = 3;
+}

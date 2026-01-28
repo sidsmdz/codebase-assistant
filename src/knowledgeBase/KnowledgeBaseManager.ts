@@ -390,6 +390,33 @@ export class KnowledgeBaseManager {
         }
     }
 
+    async clearAllData(): Promise<void> {
+        if (!this.isReady) {
+            vscode.window.showErrorMessage('OpenCat Knowledge Base is not available.');
+            return;
+        }
+
+        try {
+            // Delete all data from all tables
+            this.db.run("DELETE FROM patterns");
+            this.db.run("DELETE FROM ast_nodes");
+            this.db.run("DELETE FROM term_index");
+            this.db.run("DELETE FROM doc_stats");
+            this.db.run("DELETE FROM collection_stats");
+            this.db.run("DELETE FROM indexed_files");
+
+            // Reinitialize collection statistics
+            await this.termIndexer.updateCollectionStats();
+
+            await this.saveDatabase();
+
+            console.log('Knowledge base cleared successfully');
+        } catch (error) {
+            console.error('Error clearing knowledge base:', error);
+            throw error;
+        }
+    }
+
     /**
      * Get the hybrid search engine (for advanced queries)
      */

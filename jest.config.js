@@ -14,6 +14,10 @@ module.exports = {
   transformIgnorePatterns: [
     'node_modules/(?!(java-parser)/)',
   ],
+  moduleNameMapper: {
+    '^vscode$': '<rootDir>/src/test/__mocks__/vscode.ts',
+    '^.*/parsers/JavaASTParser$': '<rootDir>/src/test/__mocks__/JavaASTParser.ts'
+  },
   collectCoverageFrom: [
     'src/**/*.ts',
     '!src/**/*.d.ts',

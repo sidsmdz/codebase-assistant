@@ -96,6 +96,12 @@ export class IngestionService {
 
                     if (language === 'java') {
                         astNodes = this.javaParser.parse(content, file.fsPath);
+                        console.log(`📊 Java Parser: ${relativePath} returned ${astNodes.length} nodes`);
+                        if (astNodes.length > 0) {
+                            astNodes.forEach((node, idx) => {
+                                console.log(`  [${idx}] ${node.type} "${node.identifier}" - code length: ${node.code?.length || 0} chars`);
+                            });
+                        }
                     } else if (language === 'typescript') {
                         astNodes = this.tsParser.parse(content, file.fsPath);
                     } else if (language === 'javascript') {
@@ -110,12 +116,18 @@ export class IngestionService {
                     for (const node of astNodes) {
                         // Skip if no code
                         if (!node.code || node.code.trim().length < 100) {
+                            if (language === 'java') {
+                                console.log(`  ⏭️  Skipped ${node.identifier}: code too short (${node.code?.length || 0} < 100)`);
+                            }
                             continue;
                         }
 
                         // Create fingerprint for deduplication
                         const fingerprint = this.createFingerprint(node.code);
                         if (seenPatterns.has(fingerprint)) {
+                            if (language === 'java') {
+                                console.log(`  ⏭️  Skipped ${node.identifier}: duplicate fingerprint`);
+                            }
                             continue;
                         }
                         seenPatterns.add(fingerprint);
@@ -147,6 +159,10 @@ export class IngestionService {
                                 category: this.categorizeCode(node.code, language)
                             }
                         }, [node]); // Pass AST node for indexing
+
+                        if (language === 'java') {
+                            console.log(`  ✅ Saved Java pattern: ${node.identifier}`);
+                        }
 
                         patternsSaved++;
                         astNodesSaved++;

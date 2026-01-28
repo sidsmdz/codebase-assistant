@@ -14,12 +14,12 @@ export async function activate(context: vscode.ExtensionContext) {
     const provider = new ChatViewProvider(context.extensionUri, kbManager);
 
     context.subscriptions.push(
-        vscode.window.registerWebviewViewProvider('opencat.chatView', provider)
+        vscode.window.registerWebviewViewProvider('opencat.chatViewV2', provider)
     );
 
     context.subscriptions.push(
         vscode.commands.registerCommand('opencat.openChat', () => {
-            vscode.commands.executeCommand('opencat.chatView.focus');
+            vscode.commands.executeCommand('opencat.chatViewV2.focus');
         })
     );
 
@@ -87,6 +87,22 @@ export async function activate(context: vscode.ExtensionContext) {
             outputChannel.clear();
             outputChannel.appendLine(message);
             outputChannel.show();
+        })
+    );
+
+    context.subscriptions.push(
+        vscode.commands.registerCommand('opencat.resetKnowledgeBase', async () => {
+            const confirm = await vscode.window.showWarningMessage(
+                '⚠️ This will delete ALL patterns and indexed data from the knowledge base. This cannot be undone!',
+                { modal: true },
+                'Reset Knowledge Base',
+                'Cancel'
+            );
+
+            if (confirm === 'Reset Knowledge Base') {
+                await kbManager.clearAllData();
+                vscode.window.showInformationMessage('✅ Knowledge base has been reset. You can now re-index your workspace.');
+            }
         })
     );
 
