@@ -6,6 +6,7 @@ import { HybridSearchEngine } from '../search/HybridSearchEngine';
 import { ASTIndexer } from '../indexing/ASTIndexer';
 import { TermIndexer, IndexableDocument } from '../indexing/TermIndexer';
 import { ASTNode } from '../parsers/ASTParser';
+import { Feature, FeatureComponent, FeatureFlow, ComponentType } from '../analysis/FeatureAnalyzer';
 
 export interface SavedPattern {
     id: string;
@@ -162,6 +163,52 @@ export class KnowledgeBaseManager {
             );
         `);
 
+        // Feature components table (NEW - for feature analysis)
+        this.db.run(`
+            CREATE TABLE IF NOT EXISTS feature_components (
+                id TEXT PRIMARY KEY,
+                name TEXT NOT NULL,
+                component_type TEXT NOT NULL,
+                file_path TEXT NOT NULL,
+                language TEXT NOT NULL,
+                code TEXT,
+                start_line INTEGER NOT NULL,
+                end_line INTEGER NOT NULL,
+                dependencies_json TEXT,
+                dependents_json TEXT,
+                annotations_json TEXT,
+                imports_json TEXT,
+                exports_json TEXT
+            );
+        `);
+
+        // Features table (NEW - for feature analysis)
+        this.db.run(`
+            CREATE TABLE IF NOT EXISTS features (
+                id TEXT PRIMARY KEY,
+                name TEXT NOT NULL,
+                description TEXT,
+                entry_points_json TEXT,
+                components_json TEXT,
+                languages_json TEXT,
+                frameworks_json TEXT,
+                tags_json TEXT,
+                flow_json TEXT
+            );
+        `);
+
+        // Feature-component relationship table (NEW)
+        this.db.run(`
+            CREATE TABLE IF NOT EXISTS feature_component_map (
+                feature_id TEXT NOT NULL,
+                component_id TEXT NOT NULL,
+                is_entry_point INTEGER DEFAULT 0,
+                PRIMARY KEY(feature_id, component_id),
+                FOREIGN KEY(feature_id) REFERENCES features(id) ON DELETE CASCADE,
+                FOREIGN KEY(component_id) REFERENCES feature_components(id) ON DELETE CASCADE
+            );
+        `);
+
         // Create indexes for faster searching
         this.db.run(`CREATE INDEX IF NOT EXISTS idx_patterns_name ON patterns(name);`);
         this.db.run(`CREATE INDEX IF NOT EXISTS idx_patterns_language ON patterns(language);`);
@@ -169,6 +216,9 @@ export class KnowledgeBaseManager {
         this.db.run(`CREATE INDEX IF NOT EXISTS idx_ast_type ON ast_nodes(node_type);`);
         this.db.run(`CREATE INDEX IF NOT EXISTS idx_ast_language ON ast_nodes(language);`);
         this.db.run(`CREATE INDEX IF NOT EXISTS idx_term ON term_index(term);`);
+        this.db.run(`CREATE INDEX IF NOT EXISTS idx_component_type ON feature_components(component_type);`);
+        this.db.run(`CREATE INDEX IF NOT EXISTS idx_component_language ON feature_components(language);`);
+        this.db.run(`CREATE INDEX IF NOT EXISTS idx_feature_name ON features(name);`);
     }
 
     private async saveDatabase(): Promise<void> {
@@ -188,18 +238,20 @@ export class KnowledgeBaseManager {
         patternCount: number;
         astNodeCount: number;
         termCount: number;
+        indexedFilesCount: number;
         path: string;
     }> {
         if (!this.isReady) {
             vscode.window.showErrorMessage('OpenCat Knowledge Base is not available.');
-            return { patternCount: 0, astNodeCount: 0, termCount: 0, path: 'N/A' };
+            return { patternCount: 0, astNodeCount: 0, termCount: 0, indexedFilesCount: 0, path: 'N/A' };
         }
 
         const result = this.db.exec(`
             SELECT
                 (SELECT COUNT(*) FROM patterns) as pattern_count,
                 (SELECT COUNT(*) FROM ast_nodes) as ast_count,
-                (SELECT COUNT(DISTINCT term) FROM term_index) as term_count
+                (SELECT COUNT(DISTINCT term) FROM term_index) as term_count,
+                (SELECT COUNT(*) FROM indexed_files) as indexed_files_count
         `);
 
         const row = result[0]?.values[0];
@@ -207,6 +259,7 @@ export class KnowledgeBaseManager {
             patternCount: (row?.[0] as number) || 0,
             astNodeCount: (row?.[1] as number) || 0,
             termCount: (row?.[2] as number) || 0,
+            indexedFilesCount: (row?.[3] as number) || 0,
             path: this.dbPath
         };
     }
@@ -397,20 +450,36 @@ export class KnowledgeBaseManager {
         }
 
         try {
-            // Delete all data from all tables
-            this.db.run("DELETE FROM patterns");
-            this.db.run("DELETE FROM ast_nodes");
-            this.db.run("DELETE FROM term_index");
-            this.db.run("DELETE FROM doc_stats");
-            this.db.run("DELETE FROM collection_stats");
-            this.db.run("DELETE FROM indexed_files");
+            // Log counts before clearing for debugging
+            const beforeStats = await this.getStats();
+            console.log(`Clearing KB - Before: ${beforeStats.patternCount} patterns, ${beforeStats.indexedFilesCount} indexed files`);
 
-            // Reinitialize collection statistics
+            // Clear indexes using the indexer methods for proper cleanup
+            await this.termIndexer.clearIndex();
+            await this.astIndexer.clearIndex();
+
+            // Delete all data from all tables (explicit delete for tables not covered by indexers)
+            this.db.run("DELETE FROM patterns");
+            this.db.run("DELETE FROM indexed_files");
+            this.db.run("DELETE FROM feature_component_map");
+            this.db.run("DELETE FROM features");
+            this.db.run("DELETE FROM feature_components");
+
+            // Reinitialize collection statistics (will be empty after clear)
             await this.termIndexer.updateCollectionStats();
 
+            // Save the cleared database to disk
             await this.saveDatabase();
 
-            console.log('Knowledge base cleared successfully');
+            // Verify the clear worked
+            const afterStats = await this.getStats();
+            console.log(`KB cleared - After: ${afterStats.patternCount} patterns, ${afterStats.indexedFilesCount} indexed files`);
+
+            if (afterStats.patternCount > 0 || afterStats.indexedFilesCount > 0) {
+                console.error('WARNING: KB clear may not have worked completely!');
+            }
+
+            console.log('Knowledge base cleared successfully - all indexes and file tracking reset');
         } catch (error) {
             console.error('Error clearing knowledge base:', error);
             throw error;
@@ -599,5 +668,496 @@ export class KnowledgeBaseManager {
             const v = c === 'x' ? r : (r & 0x3 | 0x8);
             return v.toString(16);
         });
+    }
+
+    // ============== Feature Analysis Methods ==============
+
+    /**
+     * Save a feature component to the knowledge base
+     */
+    async saveFeatureComponent(component: FeatureComponent): Promise<void> {
+        if (!this.isReady) {
+            return;
+        }
+
+        try {
+            this.db.run(`
+                INSERT OR REPLACE INTO feature_components
+                (id, name, component_type, file_path, language, code, start_line, end_line,
+                 dependencies_json, dependents_json, annotations_json, imports_json, exports_json)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            `, [
+                component.id,
+                component.name,
+                component.type,
+                component.filePath,
+                component.language,
+                component.code,
+                component.startLine,
+                component.endLine,
+                JSON.stringify(component.dependencies),
+                JSON.stringify(component.dependents),
+                JSON.stringify(component.annotations),
+                JSON.stringify(component.imports),
+                JSON.stringify(component.exports)
+            ]);
+
+            // Index for BM25 search
+            const indexableDoc: IndexableDocument = {
+                patternId: component.id,
+                fields: {
+                    name: component.name,
+                    code: component.code,
+                    description: `${component.type}: ${component.name} (${component.language})`,
+                    comment: component.annotations.join(' ')
+                }
+            };
+            await this.termIndexer.indexDocument(indexableDoc);
+
+        } catch (error) {
+            console.error('Failed to save feature component:', error);
+        }
+    }
+
+    /**
+     * Save multiple feature components in batch
+     */
+    async saveFeatureComponents(components: FeatureComponent[]): Promise<void> {
+        for (const component of components) {
+            await this.saveFeatureComponent(component);
+        }
+        await this.termIndexer.updateCollectionStats();
+        await this.saveDatabase();
+    }
+
+    /**
+     * Save a feature to the knowledge base
+     */
+    async saveFeature(feature: Feature): Promise<void> {
+        if (!this.isReady) {
+            return;
+        }
+
+        try {
+            this.db.run(`
+                INSERT OR REPLACE INTO features
+                (id, name, description, entry_points_json, components_json,
+                 languages_json, frameworks_json, tags_json, flow_json)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            `, [
+                feature.id,
+                feature.name,
+                feature.description,
+                JSON.stringify(feature.entryPoints),
+                JSON.stringify(feature.components),
+                JSON.stringify(feature.languages),
+                JSON.stringify(feature.frameworks),
+                JSON.stringify(feature.tags),
+                JSON.stringify(feature.flow)
+            ]);
+
+            // Create feature-component mappings
+            for (const componentId of feature.components) {
+                const isEntryPoint = feature.entryPoints.includes(componentId) ? 1 : 0;
+                this.db.run(`
+                    INSERT OR REPLACE INTO feature_component_map (feature_id, component_id, is_entry_point)
+                    VALUES (?, ?, ?)
+                `, [feature.id, componentId, isEntryPoint]);
+            }
+
+            console.log(`saveFeature: Saved feature "${feature.name}" (${feature.id})`);
+        } catch (error) {
+            console.error('Failed to save feature:', error);
+            // Try to get more info about the error
+            try {
+                const tableCheck = this.db.exec("SELECT name FROM sqlite_master WHERE type='table' AND name='features'");
+                console.log('Features table exists:', tableCheck[0]?.values?.length > 0);
+            } catch (e) {
+                console.error('Could not check table existence:', e);
+            }
+        }
+    }
+
+    /**
+     * Save multiple features in batch
+     */
+    async saveFeatures(features: Feature[]): Promise<void> {
+        console.log(`saveFeatures: Starting to save ${features.length} features`);
+
+        for (const feature of features) {
+            await this.saveFeature(feature);
+        }
+
+        await this.saveDatabase();
+
+        // Verify features were saved
+        const verifyResult = this.db.exec("SELECT COUNT(*) as count FROM features");
+        const count = verifyResult[0]?.values[0]?.[0] || 0;
+        console.log(`saveFeatures: Verified ${count} features in database after save`);
+
+        console.log(`Saved ${features.length} features to knowledge base`);
+    }
+
+    /**
+     * Get all features
+     */
+    async getAllFeatures(): Promise<Feature[]> {
+        if (!this.isReady) {
+            console.log('getAllFeatures: KB not ready');
+            return [];
+        }
+
+        try {
+            const results = this.db.exec("SELECT * FROM features ORDER BY name");
+            console.log(`getAllFeatures: Query returned ${results.length} result sets`);
+
+            if (!results[0]) {
+                console.log('getAllFeatures: No results found');
+                return [];
+            }
+
+            const columns = results[0].columns;
+            const rows = results[0].values;
+            console.log(`getAllFeatures: Found ${rows.length} features`);
+
+            return rows.map((row: any[]) => {
+                const obj: any = {};
+                columns.forEach((col, idx) => {
+                    obj[col] = row[idx];
+                });
+                return {
+                    id: obj.id,
+                    name: obj.name,
+                    description: obj.description,
+                    entryPoints: JSON.parse(obj.entry_points_json || '[]'),
+                    components: JSON.parse(obj.components_json || '[]'),
+                    languages: JSON.parse(obj.languages_json || '[]'),
+                    frameworks: JSON.parse(obj.frameworks_json || '[]'),
+                    tags: JSON.parse(obj.tags_json || '[]'),
+                    flow: JSON.parse(obj.flow_json || '[]')
+                } as Feature;
+            });
+        } catch (error) {
+            console.error('getAllFeatures error:', error);
+            return [];
+        }
+    }
+
+    /**
+     * Get a feature by ID
+     */
+    async getFeatureById(featureId: string): Promise<Feature | null> {
+        if (!this.isReady) {
+            return null;
+        }
+
+        try {
+            const results = this.db.exec("SELECT * FROM features WHERE id = ?", [featureId]);
+            if (!results[0] || results[0].values.length === 0) {
+                return null;
+            }
+
+            const columns = results[0].columns;
+            const row = results[0].values[0];
+            const obj: any = {};
+            columns.forEach((col, idx) => {
+                obj[col] = row[idx];
+            });
+
+            return {
+                id: obj.id,
+                name: obj.name,
+                description: obj.description,
+                entryPoints: JSON.parse(obj.entry_points_json || '[]'),
+                components: JSON.parse(obj.components_json || '[]'),
+                languages: JSON.parse(obj.languages_json || '[]'),
+                frameworks: JSON.parse(obj.frameworks_json || '[]'),
+                tags: JSON.parse(obj.tags_json || '[]'),
+                flow: JSON.parse(obj.flow_json || '[]')
+            } as Feature;
+        } catch (error) {
+            console.error('Error getting feature by ID:', error);
+            return null;
+        }
+    }
+
+    /**
+     * Get all feature components
+     */
+    async getAllFeatureComponents(): Promise<FeatureComponent[]> {
+        if (!this.isReady) {
+            return [];
+        }
+
+        const results = this.db.exec("SELECT * FROM feature_components ORDER BY name");
+        if (!results[0]) {
+            return [];
+        }
+
+        const columns = results[0].columns;
+        const rows = results[0].values;
+
+        return rows.map((row: any[]) => {
+            const obj: any = {};
+            columns.forEach((col, idx) => {
+                obj[col] = row[idx];
+            });
+            return {
+                id: obj.id,
+                name: obj.name,
+                type: obj.component_type as ComponentType,
+                filePath: obj.file_path,
+                language: obj.language,
+                code: obj.code,
+                startLine: obj.start_line,
+                endLine: obj.end_line,
+                dependencies: JSON.parse(obj.dependencies_json || '[]'),
+                dependents: JSON.parse(obj.dependents_json || '[]'),
+                annotations: JSON.parse(obj.annotations_json || '[]'),
+                imports: JSON.parse(obj.imports_json || '[]'),
+                exports: JSON.parse(obj.exports_json || '[]')
+            } as FeatureComponent;
+        });
+    }
+
+    /**
+     * Get a feature component by ID
+     */
+    async getFeatureComponentById(componentId: string): Promise<FeatureComponent | null> {
+        if (!this.isReady) {
+            return null;
+        }
+
+        try {
+            const results = this.db.exec("SELECT * FROM feature_components WHERE id = ?", [componentId]);
+            if (!results[0] || results[0].values.length === 0) {
+                return null;
+            }
+
+            const columns = results[0].columns;
+            const row = results[0].values[0];
+            const obj: any = {};
+            columns.forEach((col, idx) => {
+                obj[col] = row[idx];
+            });
+
+            return {
+                id: obj.id,
+                name: obj.name,
+                type: obj.component_type as ComponentType,
+                filePath: obj.file_path,
+                language: obj.language,
+                code: obj.code,
+                startLine: obj.start_line,
+                endLine: obj.end_line,
+                dependencies: JSON.parse(obj.dependencies_json || '[]'),
+                dependents: JSON.parse(obj.dependents_json || '[]'),
+                annotations: JSON.parse(obj.annotations_json || '[]'),
+                imports: JSON.parse(obj.imports_json || '[]'),
+                exports: JSON.parse(obj.exports_json || '[]')
+            } as FeatureComponent;
+        } catch (error) {
+            console.error('Error getting component by ID:', error);
+            return null;
+        }
+    }
+
+    /**
+     * Search features by query
+     */
+    async searchFeatures(query: string, limit: number = 5): Promise<Feature[]> {
+        if (!this.isReady) {
+            return [];
+        }
+
+        try {
+            // Search using BM25 to find relevant components first
+            const searchResults = await this.hybridSearch.search(query, { limit: limit * 2 });
+
+            // Find features that contain these components
+            const featureIds = new Set<string>();
+            for (const result of searchResults) {
+                const mappings = this.db.exec(
+                    "SELECT feature_id FROM feature_component_map WHERE component_id = ?",
+                    [result.patternId]
+                );
+                if (mappings[0]) {
+                    for (const row of mappings[0].values) {
+                        featureIds.add(row[0] as string);
+                    }
+                }
+            }
+
+            // Also search feature names/descriptions directly
+            const nameSearch = this.db.exec(
+                "SELECT id FROM features WHERE name LIKE ? OR description LIKE ? LIMIT ?",
+                [`%${query}%`, `%${query}%`, limit]
+            );
+            if (nameSearch[0]) {
+                for (const row of nameSearch[0].values) {
+                    featureIds.add(row[0] as string);
+                }
+            }
+
+            // Get full feature objects
+            const features: Feature[] = [];
+            for (const featureId of featureIds) {
+                const feature = await this.getFeatureById(featureId);
+                if (feature) {
+                    features.push(feature);
+                }
+                if (features.length >= limit) {
+                    break;
+                }
+            }
+
+            return features;
+        } catch (error) {
+            console.error('Error searching features:', error);
+            return [];
+        }
+    }
+
+    /**
+     * Get components for a specific feature
+     */
+    async getComponentsForFeature(featureId: string): Promise<FeatureComponent[]> {
+        if (!this.isReady) {
+            return [];
+        }
+
+        try {
+            const results = this.db.exec(`
+                SELECT fc.* FROM feature_components fc
+                INNER JOIN feature_component_map fcm ON fc.id = fcm.component_id
+                WHERE fcm.feature_id = ?
+            `, [featureId]);
+
+            if (!results[0]) {
+                return [];
+            }
+
+            const columns = results[0].columns;
+            const rows = results[0].values;
+
+            return rows.map((row: any[]) => {
+                const obj: any = {};
+                columns.forEach((col, idx) => {
+                    obj[col] = row[idx];
+                });
+                return {
+                    id: obj.id,
+                    name: obj.name,
+                    type: obj.component_type as ComponentType,
+                    filePath: obj.file_path,
+                    language: obj.language,
+                    code: obj.code,
+                    startLine: obj.start_line,
+                    endLine: obj.end_line,
+                    dependencies: JSON.parse(obj.dependencies_json || '[]'),
+                    dependents: JSON.parse(obj.dependents_json || '[]'),
+                    annotations: JSON.parse(obj.annotations_json || '[]'),
+                    imports: JSON.parse(obj.imports_json || '[]'),
+                    exports: JSON.parse(obj.exports_json || '[]')
+                } as FeatureComponent;
+            });
+        } catch (error) {
+            console.error('Error getting components for feature:', error);
+            return [];
+        }
+    }
+
+    /**
+     * Get feature statistics
+     */
+    async getFeatureStats(): Promise<{
+        totalFeatures: number;
+        totalComponents: number;
+        componentsByType: Record<string, number>;
+        componentsByLanguage: Record<string, number>;
+        frameworkUsage: Record<string, number>;
+    }> {
+        if (!this.isReady) {
+            return {
+                totalFeatures: 0,
+                totalComponents: 0,
+                componentsByType: {},
+                componentsByLanguage: {},
+                frameworkUsage: {}
+            };
+        }
+
+        try {
+            // Basic counts
+            const countResult = this.db.exec(`
+                SELECT
+                    (SELECT COUNT(*) FROM features) as feature_count,
+                    (SELECT COUNT(*) FROM feature_components) as component_count
+            `);
+            const countRow = countResult[0]?.values[0];
+
+            // Components by type
+            const typeResult = this.db.exec("SELECT component_type, COUNT(*) FROM feature_components GROUP BY component_type");
+            const componentsByType: Record<string, number> = {};
+            if (typeResult[0]) {
+                typeResult[0].values.forEach(row => {
+                    componentsByType[row[0] as string] = row[1] as number;
+                });
+            }
+
+            // Components by language
+            const langResult = this.db.exec("SELECT language, COUNT(*) FROM feature_components GROUP BY language");
+            const componentsByLanguage: Record<string, number> = {};
+            if (langResult[0]) {
+                langResult[0].values.forEach(row => {
+                    componentsByLanguage[row[0] as string] = row[1] as number;
+                });
+            }
+
+            // Framework usage from features
+            const features = await this.getAllFeatures();
+            const frameworkUsage: Record<string, number> = {};
+            features.forEach(f => {
+                f.frameworks.forEach(fw => {
+                    frameworkUsage[fw] = (frameworkUsage[fw] || 0) + 1;
+                });
+            });
+
+            return {
+                totalFeatures: (countRow?.[0] as number) || 0,
+                totalComponents: (countRow?.[1] as number) || 0,
+                componentsByType,
+                componentsByLanguage,
+                frameworkUsage
+            };
+        } catch (error) {
+            console.error('Error getting feature stats:', error);
+            return {
+                totalFeatures: 0,
+                totalComponents: 0,
+                componentsByType: {},
+                componentsByLanguage: {},
+                frameworkUsage: {}
+            };
+        }
+    }
+
+    /**
+     * Clear all feature data
+     */
+    async clearFeatureData(): Promise<void> {
+        if (!this.isReady) {
+            return;
+        }
+
+        try {
+            this.db.run("DELETE FROM feature_component_map");
+            this.db.run("DELETE FROM features");
+            this.db.run("DELETE FROM feature_components");
+            await this.saveDatabase();
+            console.log('Feature data cleared');
+        } catch (error) {
+            console.error('Error clearing feature data:', error);
+        }
     }
 }

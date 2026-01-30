@@ -219,10 +219,30 @@ export class JavaASTParser extends ASTParser {
             return null;
         }
 
-        // Try to find the identifier in children
+        // Try to find the identifier node (e.g., typeIdentifier)
         const identifierNode = this.findNodeByName(node, identifierType);
-        if (identifierNode && identifierNode.image) {
-            return identifierNode.image;
+
+        if (identifierNode) {
+            // If the node has .image directly (terminal token)
+            if (identifierNode.image) {
+                return identifierNode.image;
+            }
+
+            // Otherwise, look for Identifier child inside (e.g., typeIdentifier contains Identifier)
+            if (identifierNode.children && identifierNode.children.Identifier) {
+                const idToken = identifierNode.children.Identifier[0];
+                if (idToken && idToken.image) {
+                    return idToken.image;
+                }
+            }
+        }
+
+        // Fallback: directly look for any Identifier token in children
+        if (node.children && node.children.Identifier) {
+            const idToken = node.children.Identifier[0];
+            if (idToken && idToken.image) {
+                return idToken.image;
+            }
         }
 
         return null;

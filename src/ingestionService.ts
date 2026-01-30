@@ -6,16 +6,19 @@ import { KnowledgeBaseManager } from './knowledgeBase/KnowledgeBaseManager';
 import { JavaASTParser } from './parsers/JavaASTParser';
 import { TypeScriptASTParser } from './parsers/TypeScriptASTParser';
 import { ASTNode } from './parsers/ASTParser';
+import { FeatureAnalyzer } from './analysis/FeatureAnalyzer';
 
 export class IngestionService {
     private javaParser: JavaASTParser;
     private tsParser: TypeScriptASTParser;
     private jsParser: TypeScriptASTParser;
+    private featureAnalyzer: FeatureAnalyzer;
 
     constructor(private kbManager: KnowledgeBaseManager) {
         this.javaParser = new JavaASTParser();
         this.tsParser = new TypeScriptASTParser(true);  // TypeScript
         this.jsParser = new TypeScriptASTParser(false); // JavaScript
+        this.featureAnalyzer = new FeatureAnalyzer();
     }
 
     async runIngestion() {
@@ -38,14 +41,23 @@ export class IngestionService {
             let allFiles: vscode.Uri[] = [];
             for (const pattern of patterns) {
                 const files = await vscode.workspace.findFiles(pattern, '**/node_modules/**');
+                console.log(`Found ${files.length} files matching ${pattern}`);
                 allFiles.push(...files);
             }
 
-            let patternsSaved = 0;
-            let astNodesSaved = 0;
+            // Log summary by extension
+            const byExtension: { [key: string]: number } = {};
+            allFiles.forEach(f => {
+                const ext = path.extname(f.fsPath);
+                byExtension[ext] = (byExtension[ext] || 0) + 1;
+            });
+            console.log('Files found by extension:', byExtension);
+
             let filesProcessed = 0;
             let filesSkipped = 0;
-            const seenPatterns = new Set<string>();
+
+            // Clear previous feature analysis for fresh indexing
+            this.featureAnalyzer.clear();
 
             for (let i = 0; i < allFiles.length; i++) {
                 const file = allFiles[i];
@@ -108,65 +120,11 @@ export class IngestionService {
                         astNodes = this.jsParser.parse(content, file.fsPath);
                     }
 
-                    // Group AST nodes into patterns and save
-                    const framework = this.detectFramework(content);
-                    const imports = this.extractImports(content, language);
-                    let filePatternsCount = 0;
-
-                    for (const node of astNodes) {
-                        // Skip if no code
-                        if (!node.code || node.code.trim().length < 100) {
-                            if (language === 'java') {
-                                console.log(`  ⏭️  Skipped ${node.identifier}: code too short (${node.code?.length || 0} < 100)`);
-                            }
-                            continue;
-                        }
-
-                        // Create fingerprint for deduplication
-                        const fingerprint = this.createFingerprint(node.code);
-                        if (seenPatterns.has(fingerprint)) {
-                            if (language === 'java') {
-                                console.log(`  ⏭️  Skipped ${node.identifier}: duplicate fingerprint`);
-                            }
-                            continue;
-                        }
-                        seenPatterns.add(fingerprint);
-
-                        // Detect patterns in the code
-                        const detectedPatterns = this.detectPatterns(node.code, language);
-
-                        // Build tags
-                        const tags = [
-                            'ingested',
-                            language,
-                            node.type.toLowerCase(),
-                            ...imports.slice(0, 3),
-                            ...detectedPatterns,
-                            ...(framework ? [framework] : [])
-                        ];
-
-                        // Save pattern with AST node
-                        await this.kbManager.savePattern({
-                            name: node.identifier,
-                            language: language,
-                            code: node.code,
-                            description: `${node.type} from ${path.basename(file.fsPath)}: ${node.signature || node.identifier}`,
-                            query: tags.join(' '),
-                            tags: [...new Set(tags)],
-                            metadata: {
-                                filePath: file.fsPath,
-                                framework: framework,
-                                category: this.categorizeCode(node.code, language)
-                            }
-                        }, [node]); // Pass AST node for indexing
-
-                        if (language === 'java') {
-                            console.log(`  ✅ Saved Java pattern: ${node.identifier}`);
-                        }
-
-                        patternsSaved++;
-                        astNodesSaved++;
-                        filePatternsCount++;
+                    // Analyze nodes for feature detection (builds component graph)
+                    // We no longer save individual patterns - only features
+                    if (astNodes.length > 0) {
+                        const components = this.featureAnalyzer.analyzeNodes(astNodes, content, file.fsPath);
+                        console.log(`  📊 Analyzed ${astNodes.length} nodes → ${components.length} components`);
                     }
 
                     // Mark file as indexed
@@ -174,7 +132,7 @@ export class IngestionService {
                         file.fsPath,
                         stats.mtimeMs,
                         fileHash,
-                        filePatternsCount
+                        astNodes.length
                     );
 
                     filesProcessed++;
@@ -184,9 +142,28 @@ export class IngestionService {
                 }
             }
 
+            // Phase 2: Identify and save features from analyzed components
+            progress.report({ message: "🔍 Identifying features..." });
+
+            const features = this.featureAnalyzer.identifyFeatures();
+            const components = this.featureAnalyzer.getComponents();
+
+            if (components.length > 0) {
+                progress.report({ message: `💾 Saving ${components.length} components...` });
+                await this.kbManager.saveFeatureComponents(components);
+            }
+
+            if (features.length > 0) {
+                progress.report({ message: `💾 Saving ${features.length} features...` });
+                await this.kbManager.saveFeatures(features);
+            }
+
+            const featureStats = this.featureAnalyzer.getStats();
+            console.log('Feature Analysis Stats:', featureStats);
+
             const message = filesSkipped > 0
-                ? `✅ Indexed ${patternsSaved} patterns from ${filesProcessed} files! Skipped ${filesSkipped} unchanged files.`
-                : `✅ Indexed ${patternsSaved} patterns with ${astNodesSaved} AST nodes from ${filesProcessed} files!`;
+                ? `✅ Indexed ${features.length} features with ${components.length} components from ${filesProcessed} files! Skipped ${filesSkipped} unchanged files.`
+                : `✅ Indexed ${features.length} features with ${components.length} components from ${filesProcessed} files!`;
 
             vscode.window.showInformationMessage(message);
         });
@@ -353,6 +330,66 @@ export class IngestionService {
             return 'utility';
         }
         return 'general';
+    }
+
+    /**
+     * Filter out trivial patterns that aren't meaningful for the knowledge base
+     */
+    private isTrivialPattern(identifier: string, nodeType: string, code: string): boolean {
+        const lowerIdentifier = identifier.toLowerCase();
+
+        // Skip standard library / common type names
+        const trivialNames = [
+            'arraylist', 'hashmap', 'hashset', 'linkedlist', 'treemap', 'treeset',
+            'list', 'map', 'set', 'collection', 'iterator', 'comparable',
+            'string', 'integer', 'boolean', 'double', 'float', 'long', 'object',
+            'date', 'calendar', 'timestamp', 'uuid', 'optional', 'stream',
+            'exception', 'error', 'throwable', 'runtimeexception',
+            'tostring', 'hashcode', 'equals', 'clone', 'compareto',
+            'promise', 'array', 'number', 'any', 'void', 'unknown', 'never'
+        ];
+
+        if (trivialNames.includes(lowerIdentifier)) {
+            return true;
+        }
+
+        // Skip simple getters/setters (methods that are just get/set + field access)
+        if (nodeType === 'METHOD') {
+            if (lowerIdentifier.startsWith('get') || lowerIdentifier.startsWith('set')) {
+                // Check if it's a simple getter/setter (very short code with just return/assign)
+                const lines = code.split('\n').filter(l => l.trim().length > 0);
+                if (lines.length <= 4) {
+                    const codeBody = code.replace(/\s+/g, '');
+                    if (codeBody.includes('return this.') || codeBody.includes('this.=')) {
+                        return true;
+                    }
+                }
+            }
+        }
+
+        // Skip very generic method names
+        const genericMethodNames = [
+            'init', 'initialize', 'setup', 'configure', 'destroy', 'dispose',
+            'run', 'start', 'stop', 'execute', 'apply', 'call', 'invoke',
+            'get', 'set', 'add', 'remove', 'update', 'delete', 'find', 'create'
+        ];
+
+        if (nodeType === 'METHOD' && genericMethodNames.includes(lowerIdentifier)) {
+            // Only skip if the code is very short (likely just delegating)
+            if (code.length < 200) {
+                return true;
+            }
+        }
+
+        // Skip interfaces that are just type definitions without behavior
+        if (nodeType === 'INTERFACE') {
+            // Keep interfaces if they have JSDoc or meaningful structure
+            if (!code.includes('/**') && code.split('\n').length < 10) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private createFingerprint(code: string): string {

@@ -12,6 +12,9 @@
     "Programming Languages"
   ],
   "main": "./dist/extension.js",
+  "extensionDependencies": [
+    "github.copilot-chat"
+  ],
   "activationEvents": [],
   "contributes": {
     "configuration": {

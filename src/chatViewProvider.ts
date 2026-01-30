@@ -7,12 +7,22 @@ import { KnowledgeBaseManager } from './knowledgeBase/KnowledgeBaseManager';
 import { ContextBuilder } from './knowledgeBase/ContextBuilder';
 import { getConfig } from './config';
 
+interface ConversationMessage {
+    role: 'user' | 'assistant';
+    content: string;
+    timestamp: number;
+}
+
 export class ChatViewProvider implements vscode.WebviewViewProvider {
     private _view?: vscode.WebviewView;
     private contextBuilder: ContextBuilder;
     private lastQuery: string = '';
     private lastResponse: string = '';
     private lastEnrichedPrompt: string = '';
+
+    // Conversation memory for follow-ups
+    private conversationHistory: ConversationMessage[] = [];
+    private readonly MAX_HISTORY_LENGTH = 6; // Keep last 3 exchanges (6 messages)
 
     constructor(
         private readonly _extensionUri: vscode.Uri,
@@ -61,7 +71,15 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
                     await this.handleShowStats();
                     break;
                 case 'browsePatterns':
-                    await this.handleBrowsePatterns();
+                case 'browseFeatures':
+                    await this.handleBrowseFeatures();
+                    break;
+                case 'useFeatureAsContext':
+                    if (data.userQuestion) {
+                        await this.handleUseFeatureAsContext(data.feature, data.userQuestion);
+                    } else {
+                        await this.promptAndUseFeatureAsContext(data.feature);
+                    }
                     break;
                 case 'deletePattern':
                     await this.handleDeletePattern(data.patternId);
@@ -70,6 +88,16 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
                     if (this.lastQuery) {
                         await this.handleUserMessage(this.lastQuery);
                     }
+                    break;
+                case 'followUp':
+                    await this.handleUserMessage(data.message, true);
+                    break;
+                case 'quickAction':
+                    await this.handleQuickAction(data.action);
+                    break;
+                case 'clearHistory':
+                    this.conversationHistory = [];
+                    this._view?.webview.postMessage({ type: 'historyCleared' });
                     break;
             }
         });
@@ -90,7 +118,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
         });
     }
 
-    private async handleUserMessage(message: string) {
+    private async handleUserMessage(message: string, isFollowUp: boolean = false) {
         this._view?.webview.postMessage({
             type: 'addMessage',
             role: 'user',
@@ -103,15 +131,34 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
             this.lastQuery = message;
             this.lastResponse = '';
 
-            const enrichedPrompt = await this.contextBuilder.buildContextForQuery(message);
+            // Add user message to conversation history
+            this.conversationHistory.push({
+                role: 'user',
+                content: message,
+                timestamp: Date.now()
+            });
+
+            // Build prompt with conversation context for follow-ups
+            let enrichedPrompt: string;
+            if (isFollowUp && this.conversationHistory.length > 1) {
+                // Include conversation history for follow-ups
+                const historyContext = this.buildConversationContext();
+                const kbContext = await this.contextBuilder.buildContextForQuery(message);
+                enrichedPrompt = `${kbContext}\n\n--- CONVERSATION HISTORY ---\n${historyContext}\n\n--- CURRENT FOLLOW-UP ---\nUser: ${message}`;
+            } else {
+                enrichedPrompt = await this.contextBuilder.buildContextForQuery(message);
+            }
             this.lastEnrichedPrompt = enrichedPrompt;
 
             const contextSummary = this.summarizeContext(enrichedPrompt);
+            const historyIndicator = this.conversationHistory.length > 2
+                ? `\n📜 Conversation context: ${Math.floor(this.conversationHistory.length / 2)} previous exchanges`
+                : '';
 
             this._view?.webview.postMessage({
                 type: 'addMessage',
                 role: 'assistant',
-                content: `🔍 Found context:\n${contextSummary}\n\n🤖 Asking Copilot...`
+                content: `🔍 Found context:\n${contextSummary}${historyIndicator}\n\n🤖 Asking Copilot...`
             });
 
             const response = await this.callCopilot(enrichedPrompt);
@@ -119,11 +166,29 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
             if (response) {
                 this.lastResponse = response;
 
+                // Add assistant response to history
+                this.conversationHistory.push({
+                    role: 'assistant',
+                    content: response,
+                    timestamp: Date.now()
+                });
+
+                // Trim history if too long
+                while (this.conversationHistory.length > this.MAX_HISTORY_LENGTH) {
+                    this.conversationHistory.shift();
+                }
+
+                // Detect if response offers to generate more
+                const offersContinuation = this.detectContinuationOffer(response);
+
                 this._view?.webview.postMessage({
                     type: 'addMessage',
                     role: 'assistant',
                     content: response,
-                    showActions: true
+                    showActions: true,
+                    quickActions: offersContinuation
+                        ? ['yes_generate', 'show_example', 'explain_more']
+                        : ['show_example', 'explain_more']
                 });
 
                 if (this.containsCode(response)) {
@@ -135,7 +200,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
                 this._view?.webview.postMessage({
                     type: 'addMessage',
                     role: 'assistant',
-                    content: '❌ Copilot unavailable. Make sure GitHub Copilot is installed and active.'
+                    content: '❌ Copilot unavailable. Make sure GitHub Copilot Chat is installed and active. Check the Output panel (OpenCat) for details.'
                 });
             }
 
@@ -192,38 +257,130 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
         return summary.join('\n');
     }
 
+    /**
+     * Build conversation context from history for follow-up messages
+     */
+    private buildConversationContext(): string {
+        if (this.conversationHistory.length === 0) {
+            return '';
+        }
+
+        const contextMessages = this.conversationHistory.slice(-this.MAX_HISTORY_LENGTH);
+        return contextMessages.map(msg => {
+            const role = msg.role === 'user' ? 'User' : 'Assistant';
+            // Truncate long messages in history
+            const content = msg.content.length > 1000
+                ? msg.content.substring(0, 1000) + '... [truncated]'
+                : msg.content;
+            return `${role}: ${content}`;
+        }).join('\n\n');
+    }
+
+    /**
+     * Detect if the response offers to generate more content
+     */
+    private detectContinuationOffer(response: string): boolean {
+        const continuationPhrases = [
+            'if you want',
+            'if you\'d like',
+            'would you like',
+            'i can generate',
+            'i can create',
+            'i can show',
+            'i can provide',
+            'let me know if',
+            'shall i',
+            'do you want me to'
+        ];
+
+        const lowerResponse = response.toLowerCase();
+        return continuationPhrases.some(phrase => lowerResponse.includes(phrase));
+    }
+
+    /**
+     * Handle quick action buttons from the UI
+     */
+    private async handleQuickAction(action: string) {
+        const actionMessages: Record<string, string> = {
+            'yes_generate': 'Yes, please generate it.',
+            'show_example': 'Can you show me a complete example with code?',
+            'explain_more': 'Can you explain this in more detail?',
+            'show_related': 'What other components or features are related to this?',
+            'how_to_use': 'How do I use this in my code?',
+            'best_practices': 'What are the best practices for this pattern?'
+        };
+
+        const message = actionMessages[action];
+        if (message) {
+            await this.handleUserMessage(message, true);
+        }
+    }
+
     private async callCopilot(prompt: string): Promise<string | null> {
         try {
-            const models = await vscode.lm.selectChatModels({
-                vendor: 'copilot'
-            });
+            const allModels = await vscode.lm.selectChatModels({ vendor: 'copilot' });
 
-            if (models.length === 0) {
-                console.log('No Copilot models available');
+            if (allModels.length === 0) {
+                console.error('No Copilot language models available. Copilot Chat extension may not be installed or active.');
                 return null;
             }
 
-            const model = models[0];
+            // Log all available models for debugging
+            console.log(`OpenCat: Available models: ${allModels.map(m => m.id).join(', ')}`);
 
-            const messages = (prompt.includes('--- CONTEXT ---') || prompt.includes('You are a helpful and precise code assistant'))
-                ? [vscode.LanguageModelChatMessage.User(prompt)]
-                : [vscode.LanguageModelChatMessage.User(prompt)];
+            // Prefer known-working models, sorted by preference
+            const preferredModelPatterns = ['gpt-4o', 'gpt-4', 'gpt-3.5', 'claude', 'copilot'];
+            const sortedModels = [...allModels].sort((a, b) => {
+                const aIdx = preferredModelPatterns.findIndex(p => a.id.toLowerCase().includes(p));
+                const bIdx = preferredModelPatterns.findIndex(p => b.id.toLowerCase().includes(p));
+                // Models matching a preferred pattern come first; earlier patterns are more preferred
+                const aScore = aIdx >= 0 ? aIdx : 999;
+                const bScore = bIdx >= 0 ? bIdx : 999;
+                return aScore - bScore;
+            });
 
-            const chatResponse = await model.sendRequest(
-                messages,
-                {},
-                new vscode.CancellationTokenSource().token
-            );
+            // Try each model until one succeeds
+            const errors: string[] = [];
+            for (const model of sortedModels) {
+                try {
+                    console.log(`OpenCat: Trying model "${model.id}" (vendor: ${model.vendor})`);
 
-            let fullResponse = '';
-            for await (const fragment of chatResponse.text) {
-                fullResponse += fragment;
+                    const messages = [vscode.LanguageModelChatMessage.User(prompt)];
+                    const chatResponse = await model.sendRequest(
+                        messages,
+                        {},
+                        new vscode.CancellationTokenSource().token
+                    );
+
+                    let fullResponse = '';
+                    for await (const fragment of chatResponse.text) {
+                        fullResponse += fragment;
+                    }
+
+                    console.log(`OpenCat: Success with model "${model.id}"`);
+                    return fullResponse;
+                } catch (modelError: unknown) {
+                    const msg = modelError instanceof Error ? modelError.message : String(modelError);
+                    console.warn(`OpenCat: Model "${model.id}" failed: ${msg}`);
+                    errors.push(`${model.id}: ${msg}`);
+                    // Continue to try the next model
+                }
             }
 
-            return fullResponse;
+            // All models failed
+            console.error(`OpenCat: All ${sortedModels.length} models failed:\n${errors.join('\n')}`);
+            return null;
 
-        } catch (error) {
-            console.error('Failed to call Copilot:', error);
+        } catch (error: unknown) {
+            const errMsg = error instanceof Error ? error.message : String(error);
+            console.error('Failed to call Copilot:', errMsg, error);
+
+            if (errMsg.includes('consent') || errMsg.includes('permission') || errMsg.includes('access')) {
+                vscode.window.showWarningMessage(
+                    'OpenCat needs permission to use Copilot. Please allow access when prompted.',
+                    'Try Again'
+                );
+            }
             return null;
         }
     }
@@ -346,12 +503,178 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
         }
     }
 
-    private async handleBrowsePatterns() {
-        const patterns = await this._kbManager.getAllPatterns();
+    private async handleBrowseFeatures() {
+        // Get features from workspace scanning (features table)
+        const features = await this._kbManager.getAllFeatures();
+
+        // For each feature, get its components to build full context
+        const featuresWithContext = await Promise.all(features.map(async (feature) => {
+            const components = await this._kbManager.getComponentsForFeature(feature.id);
+
+            // Build full code context from all components
+            const codeContext = components.map(comp =>
+                `// --- ${comp.type}: ${comp.name} ---\n// File: ${comp.filePath}:${comp.startLine}-${comp.endLine}\n${comp.code || ''}`
+            ).join('\n\n');
+
+            return {
+                id: feature.id,
+                name: feature.name,
+                language: feature.languages.length > 0 ? feature.languages[0] : 'multiple',
+                code: codeContext || `// Feature: ${feature.name}\n// No component code available`,
+                description: feature.description || `Feature with ${components.length} components across ${feature.languages.join(', ')}`,
+                query: '',
+                savedAt: new Date().toISOString(),
+                tags: [...feature.tags, ...feature.frameworks],
+                metadata: {
+                    category: 'Feature',
+                    framework: feature.frameworks.length > 0 ? feature.frameworks[0] : undefined,
+                    componentCount: components.length,
+                    languages: feature.languages,
+                    entryPoints: feature.entryPoints
+                },
+                // Include component details for richer display
+                components: components.map(c => ({
+                    id: c.id,
+                    name: c.name,
+                    type: c.type,
+                    filePath: c.filePath,
+                    language: c.language
+                }))
+            };
+        }));
+
+        console.log(`Browse Features: ${features.length} features loaded with full context`);
+
         this._view?.webview.postMessage({
-            type: 'allPatterns',
-            patterns: patterns
+            type: 'allFeatures',
+            features: featuresWithContext
         });
+    }
+
+    /**
+     * Prompt user for a question using VS Code's native input box, then use feature as context
+     */
+    private async promptAndUseFeatureAsContext(feature: any) {
+        const userQuestion = await vscode.window.showInputBox({
+            prompt: `What would you like to know about "${feature.name}"?`,
+            placeHolder: 'e.g., How does this feature work? / Explain the main components',
+            value: 'How does this feature work?'
+        });
+
+        if (userQuestion && userQuestion.trim()) {
+            await this.handleUseFeatureAsContext(feature, userQuestion.trim());
+        }
+    }
+
+    /**
+     * Handle using a feature as context for a Copilot query
+     */
+    private async handleUseFeatureAsContext(feature: any, userQuestion: string) {
+        // Show user's question in chat
+        this._view?.webview.postMessage({
+            type: 'addMessage',
+            role: 'user',
+            content: userQuestion
+        });
+
+        try {
+            this._view?.webview.postMessage({ type: 'startTyping' });
+
+            // Build context summary for display
+            const componentCount = feature.metadata?.componentCount || 0;
+            const languages = feature.metadata?.languages?.join(', ') || feature.language;
+            const frameworks = feature.tags?.filter((t: string) => !['feature', 'workspace-scanned'].includes(t)).slice(0, 3).join(', ') || 'none';
+
+            const contextSummary = `📁 **Feature Context: ${feature.name}**
+• Components: ${componentCount}
+• Languages: ${languages}
+• Tags: ${frameworks}
+• Code length: ${feature.code?.length || 0} characters`;
+
+            // Show context being sent
+            this._view?.webview.postMessage({
+                type: 'addMessage',
+                role: 'assistant',
+                content: `🔍 **Using Feature as Context**\n\n${contextSummary}\n\n🤖 Asking Copilot with this context...`
+            });
+
+            // Build the enriched prompt with feature context
+            const enrichedPrompt = `You are a helpful code assistant. The user is asking about code in their workspace.
+
+--- FEATURE CONTEXT: ${feature.name} ---
+Description: ${feature.description || 'No description'}
+Languages: ${languages}
+Components: ${componentCount}
+
+--- CODE FROM THIS FEATURE ---
+${feature.code}
+
+--- USER QUESTION ---
+${userQuestion}
+
+Please answer the user's question using the feature context above. Reference specific parts of the code when relevant.`;
+
+            this.lastQuery = userQuestion;
+            this.lastEnrichedPrompt = enrichedPrompt;
+
+            // Add to conversation history
+            this.conversationHistory.push({
+                role: 'user',
+                content: `[Feature: ${feature.name}] ${userQuestion}`,
+                timestamp: Date.now()
+            });
+
+            const response = await this.callCopilot(enrichedPrompt);
+
+            if (response) {
+                this.lastResponse = response;
+
+                // Add to conversation history
+                this.conversationHistory.push({
+                    role: 'assistant',
+                    content: response,
+                    timestamp: Date.now()
+                });
+
+                // Trim history if too long
+                while (this.conversationHistory.length > this.MAX_HISTORY_LENGTH) {
+                    this.conversationHistory.shift();
+                }
+
+                // Send response with action buttons
+                this._view?.webview.postMessage({
+                    type: 'addMessage',
+                    role: 'assistant',
+                    content: response,
+                    showActions: true,
+                    featureContext: feature.name,
+                    quickActions: ['show_example', 'explain_more', 'show_related']
+                });
+
+                // Show save button if response contains code
+                if (this.containsCode(response)) {
+                    this._view?.webview.postMessage({
+                        type: 'showSaveButton'
+                    });
+                }
+            } else {
+                this._view?.webview.postMessage({
+                    type: 'addMessage',
+                    role: 'assistant',
+                    content: '❌ Copilot unavailable. Make sure GitHub Copilot Chat is installed and active. Check the Output panel (OpenCat) for details.'
+                });
+            }
+
+        } catch (error) {
+            console.error('OpenCat feature context error:', error);
+            this._view?.webview.postMessage({
+                type: 'addMessage',
+                role: 'assistant',
+                content: `❌ Error: ${error instanceof Error ? error.message : String(error)}`
+            });
+        } finally {
+            this._view?.webview.postMessage({ type: 'stopTyping' });
+        }
     }
 
     private async handleDeletePattern(patternId: string) {
@@ -361,8 +684,8 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
             role: 'assistant',
             content: '✅ Pattern deleted successfully'
         });
-        // Refresh the pattern list if browser is open
-        await this.handleBrowsePatterns();
+        // Refresh the feature list if browser is open
+        await this.handleBrowseFeatures();
     }
 
     private extractCodeBlocks(text: string): string[] {
@@ -645,6 +968,42 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
 
         .message-action-btn:hover {
             background-color: var(--vscode-list-hoverBackground);
+        }
+
+        /* Quick action buttons for follow-ups */
+        .quick-actions {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+            margin-top: 12px;
+            padding-top: 12px;
+            border-top: 1px solid var(--vscode-panel-border);
+            align-items: center;
+        }
+
+        .quick-actions-label {
+            font-size: 11px;
+            color: var(--vscode-descriptionForeground);
+            font-weight: 600;
+            margin-right: 4px;
+        }
+
+        .quick-action-btn {
+            padding: 6px 12px;
+            font-size: 11px;
+            background-color: var(--vscode-button-secondaryBackground);
+            color: var(--vscode-button-secondaryForeground);
+            border: 1px solid var(--vscode-button-border, transparent);
+            border-radius: 16px;
+            cursor: pointer;
+            transition: all 0.2s;
+            font-weight: 500;
+        }
+
+        .quick-action-btn:hover {
+            background-color: var(--vscode-button-background);
+            color: var(--vscode-button-foreground);
+            transform: translateY(-1px);
         }
 
         /* Typing indicator */
@@ -1461,8 +1820,8 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
         </div>
 
         <div class="welcome-actions">
-            <button class="welcome-action-btn" id="welcome-browse-patterns-btn">
-                📚 Browse Knowledge Base
+            <button class="welcome-action-btn" id="welcome-browse-features-btn">
+                📚 Browse Features
             </button>
         </div>
     </div>
@@ -1511,7 +1870,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     </div>
 
     <div id="action-buttons">
-        <button class="action-btn" id="browse-patterns-btn">📚 Browse Patterns</button>
+        <button class="action-btn" id="browse-features-btn">📚 Browse Features</button>
         <button class="action-btn" id="show-context-btn">🔍 Show Context</button>
         <button class="action-btn primary" id="save-pattern-btn">💾 Save Pattern</button>
         <button class="action-btn" id="clear-chat-btn">🗑️ Clear Chat</button>
@@ -1529,11 +1888,11 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
         </div>
     </div>
 
-    <!-- Pattern Browser Modal -->
-    <div id="pattern-browser-modal" class="modal">
+    <!-- Feature Browser Modal -->
+    <div id="feature-browser-modal" class="modal">
         <div class="modal-content pattern-browser">
             <div class="browser-header">
-                <h2>📚 Knowledge Base Patterns</h2>
+                <h2>📚 Workspace Features</h2>
                 <button class="close-btn" id="close-browser-btn">×</button>
             </div>
 
@@ -1647,16 +2006,39 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
             if (showActions && role === 'assistant') {
                 const actionsDiv = document.createElement('div');
                 actionsDiv.className = 'message-actions';
+
+                // Standard actions
                 actionsDiv.innerHTML = '<button class="message-action-btn copy-btn">📋 Copy</button>' +
                     '<button class="message-action-btn regenerate-btn">🔄 Regenerate</button>';
+
                 messageDiv.appendChild(actionsDiv);
 
                 actionsDiv.querySelector('.copy-btn').addEventListener('click', () => {
                     navigator.clipboard.writeText(content);
+                    showToast('✅ Copied to clipboard');
                 });
 
                 actionsDiv.querySelector('.regenerate-btn').addEventListener('click', () => {
                     vscode.postMessage({ type: 'regenerate' });
+                });
+
+                // Quick follow-up actions
+                const quickActionsDiv = document.createElement('div');
+                quickActionsDiv.className = 'quick-actions';
+                quickActionsDiv.innerHTML =
+                    '<span class="quick-actions-label">Continue:</span>' +
+                    '<button class="quick-action-btn" data-action="show_example">📝 Show Example</button>' +
+                    '<button class="quick-action-btn" data-action="explain_more">🔍 Explain More</button>' +
+                    '<button class="quick-action-btn" data-action="how_to_use">💡 How to Use</button>' +
+                    '<button class="quick-action-btn" data-action="best_practices">⭐ Best Practices</button>';
+                messageDiv.appendChild(quickActionsDiv);
+
+                // Attach event listeners to quick action buttons
+                quickActionsDiv.querySelectorAll('.quick-action-btn').forEach(btn => {
+                    btn.addEventListener('click', () => {
+                        const action = btn.getAttribute('data-action');
+                        vscode.postMessage({ type: 'quickAction', action: action });
+                    });
                 });
             }
 
@@ -1704,390 +2086,379 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
             });
         });
 
-        // Pattern Browser State
-        let allPatterns = [];
-        let filteredPatterns = [];
-        const patternBrowserModal = document.getElementById('pattern-browser-modal');
-        const patternList = document.getElementById('pattern-list');
-        const patternSearchInput = document.getElementById('pattern-search-input');
-        const featureFilter = document.getElementById('feature-filter');
+        // Feature Browser State
+        let allFeatures = [];
+        let filteredFeatures = [];
+        const featureBrowserModal = document.getElementById('feature-browser-modal');
+        const featureList = document.getElementById('pattern-list');
+        const featureSearchInput = document.getElementById('pattern-search-input');
+        const categoryFilter = document.getElementById('feature-filter');
         const languageFilter = document.getElementById('language-filter');
         const sortBy = document.getElementById('sort-by');
-        const groupByFeatureCheckbox = document.getElementById('group-by-feature');
-        const patternCount = document.getElementById('pattern-count');
+        const groupByFrameworkCheckbox = document.getElementById('group-by-feature');
+        const featureCount = document.getElementById('pattern-count');
         const closeBrowserBtn = document.getElementById('close-browser-btn');
 
-        // Browse Patterns button click handler (reusable function)
-        function openPatternBrowser() {
-            console.log('Browse Patterns button clicked');
-            console.log('Modal element:', patternBrowserModal);
+        // Browse Features button click handler (reusable function)
+        function openFeatureBrowser() {
+            console.log('Browse Features button clicked');
+            console.log('Modal element:', featureBrowserModal);
 
-            if (!patternBrowserModal) {
-                console.error('Pattern browser modal not found!');
+            if (!featureBrowserModal) {
+                console.error('Feature browser modal not found!');
                 return;
             }
 
-            vscode.postMessage({ type: 'browsePatterns' });
-            patternBrowserModal.classList.add('active');
+            vscode.postMessage({ type: 'browseFeatures' });
+            featureBrowserModal.classList.add('active');
             console.log('Modal should now be visible');
         }
 
         // Browse button in action buttons (after messages)
-        const browsePatternsBtn = document.getElementById('browse-patterns-btn');
-        if (browsePatternsBtn) {
-            browsePatternsBtn.addEventListener('click', openPatternBrowser);
+        const browseFeaturesBtn = document.getElementById('browse-features-btn');
+        if (browseFeaturesBtn) {
+            browseFeaturesBtn.addEventListener('click', openFeatureBrowser);
         } else {
-            console.error('Browse patterns button (action buttons) not found!');
+            console.error('Browse features button (action buttons) not found!');
         }
 
         // Browse button on welcome screen
-        const welcomeBrowseBtn = document.getElementById('welcome-browse-patterns-btn');
+        const welcomeBrowseBtn = document.getElementById('welcome-browse-features-btn');
         if (welcomeBrowseBtn) {
-            welcomeBrowseBtn.addEventListener('click', openPatternBrowser);
+            welcomeBrowseBtn.addEventListener('click', openFeatureBrowser);
         } else {
-            console.error('Browse patterns button (welcome screen) not found!');
+            console.error('Browse features button (welcome screen) not found!');
         }
 
         if (closeBrowserBtn) {
             closeBrowserBtn.addEventListener('click', () => {
-                if (patternBrowserModal) {
-                    patternBrowserModal.classList.remove('active');
+                if (featureBrowserModal) {
+                    featureBrowserModal.classList.remove('active');
                 }
             });
         }
 
         // Close modal on outside click
-        if (patternBrowserModal) {
-            patternBrowserModal.addEventListener('click', (e) => {
-                if (e.target === patternBrowserModal) {
-                    patternBrowserModal.classList.remove('active');
+        if (featureBrowserModal) {
+            featureBrowserModal.addEventListener('click', (e) => {
+                if (e.target === featureBrowserModal) {
+                    featureBrowserModal.classList.remove('active');
                 }
             });
         }
 
-        // Pattern search and filter
-        if (patternSearchInput) {
-            patternSearchInput.addEventListener('input', () => {
-                filterPatterns();
+        // Feature search and filter
+        if (featureSearchInput) {
+            featureSearchInput.addEventListener('input', () => {
+                filterFeatures();
             });
         }
 
-        if (featureFilter) {
-            featureFilter.addEventListener('change', () => {
-                filterPatterns();
+        if (categoryFilter) {
+            categoryFilter.addEventListener('change', () => {
+                filterFeatures();
             });
         }
 
         if (languageFilter) {
             languageFilter.addEventListener('change', () => {
-                filterPatterns();
+                filterFeatures();
             });
         }
 
         if (sortBy) {
             sortBy.addEventListener('change', () => {
-                sortPatterns();
+                sortFeatures();
             });
         }
 
-        if (groupByFeatureCheckbox) {
-            groupByFeatureCheckbox.addEventListener('change', () => {
-                renderPatterns();
+        if (groupByFrameworkCheckbox) {
+            groupByFrameworkCheckbox.addEventListener('change', () => {
+                renderFeatures();
             });
         }
 
         /**
-         * Discover unique features from all patterns
-         * Extracts features from: metadata.category, tags, and pattern names
+         * Discover unique frameworks/categories from all features
          */
-        function discoverFeatures() {
-            const featuresSet = new Set();
+        function discoverCategories() {
+            const categoriesSet = new Set();
 
-            allPatterns.forEach(pattern => {
-                // 1. Check metadata.category
-                if (pattern.metadata?.category) {
-                    featuresSet.add(pattern.metadata.category);
+            allFeatures.forEach(feature => {
+                // Add frameworks
+                if (feature.metadata?.framework) {
+                    categoriesSet.add(feature.metadata.framework);
                 }
 
-                // 2. Extract features from tags
-                // Common patterns: 'ag-grid', 'websocket', 'validation', 'authentication', etc.
-                if (pattern.tags && pattern.tags.length > 0) {
-                    pattern.tags.forEach(tag => {
-                        // Add multi-word tags or compound tags as features
-                        // e.g., 'ag-grid' -> 'AG Grid', 'row-styling' -> 'Row Styling'
-                        const feature = tag
+                // Add languages
+                if (feature.metadata?.languages) {
+                    feature.metadata.languages.forEach(lang => categoriesSet.add(lang));
+                }
+
+                // Add tags
+                if (feature.tags && feature.tags.length > 0) {
+                    feature.tags.forEach(tag => {
+                        const category = tag
                             .split('-')
                             .map(word => word.charAt(0).toUpperCase() + word.slice(1))
                             .join(' ');
-                        featuresSet.add(feature);
+                        categoriesSet.add(category);
                     });
-                }
-
-                // 3. Extract feature from pattern name (first word or key phrase)
-                // e.g., "WebSocket Reconnection Logic" -> "WebSocket"
-                const nameWords = pattern.name.split(' ');
-                if (nameWords.length > 0) {
-                    const firstWord = nameWords[0];
-                    if (firstWord.length > 2) { // Avoid very short words
-                        featuresSet.add(firstWord);
-                    }
                 }
             });
 
-            // Sort features alphabetically
-            return Array.from(featuresSet).sort();
+            return Array.from(categoriesSet).sort();
         }
 
         /**
-         * Populate the feature filter dropdown with discovered features
+         * Populate the category filter dropdown
          */
-        function populateFeatureFilter() {
-            const features = discoverFeatures();
+        function populateCategoryFilter() {
+            const categories = discoverCategories();
 
-            // Keep "All Features" option and add discovered features
-            const options = '<option value="all">All Features</option>' +
-                features.map(feature => '<option value="' + escapeHtml(feature) + '">' + escapeHtml(feature) + '</option>').join('');
+            const options = '<option value="all">All Categories</option>' +
+                categories.map(cat => '<option value="' + escapeHtml(cat) + '">' + escapeHtml(cat) + '</option>').join('');
 
-            featureFilter.innerHTML = options;
+            if (categoryFilter) {
+                categoryFilter.innerHTML = options;
+            }
         }
 
         /**
-         * Check if a pattern matches a given feature
+         * Check if a feature matches a given category
          */
-        function patternMatchesFeature(pattern, feature) {
-            if (feature === 'all') return true;
+        function featureMatchesCategory(feature, category) {
+            if (category === 'all') return true;
 
-            // Normalize feature for comparison
-            const normalizedFeature = feature.toLowerCase();
+            const normalizedCategory = category.toLowerCase();
 
-            // Check metadata.category
-            if (pattern.metadata?.category &&
-                pattern.metadata.category.toLowerCase() === normalizedFeature) {
+            // Check framework
+            if (feature.metadata?.framework &&
+                feature.metadata.framework.toLowerCase() === normalizedCategory) {
+                return true;
+            }
+
+            // Check languages
+            if (feature.metadata?.languages &&
+                feature.metadata.languages.some(lang => lang.toLowerCase() === normalizedCategory)) {
                 return true;
             }
 
             // Check tags
-            if (pattern.tags && pattern.tags.some(tag => {
-                const tagFeature = tag
+            if (feature.tags && feature.tags.some(tag => {
+                const tagCategory = tag
                     .split('-')
                     .map(word => word.charAt(0).toUpperCase() + word.slice(1))
                     .join(' ');
-                return tagFeature.toLowerCase() === normalizedFeature;
+                return tagCategory.toLowerCase() === normalizedCategory;
             })) {
                 return true;
             }
 
-            // Check pattern name
-            if (pattern.name.toLowerCase().includes(normalizedFeature)) {
+            // Check feature name
+            if (feature.name.toLowerCase().includes(normalizedCategory)) {
                 return true;
             }
 
             return false;
         }
 
-        function filterPatterns() {
-            const searchTerm = patternSearchInput.value.toLowerCase();
-            const langFilter = languageFilter.value;
-            const featFilter = featureFilter.value;
+        function filterFeatures() {
+            const searchTerm = featureSearchInput ? featureSearchInput.value.toLowerCase() : '';
+            const langFilter = languageFilter ? languageFilter.value : 'all';
+            const catFilter = categoryFilter ? categoryFilter.value : 'all';
 
-            filteredPatterns = allPatterns.filter(pattern => {
+            filteredFeatures = allFeatures.filter(feature => {
                 const matchesSearch =
-                    pattern.name.toLowerCase().includes(searchTerm) ||
-                    pattern.description.toLowerCase().includes(searchTerm) ||
-                    (pattern.tags && pattern.tags.some(tag => tag.toLowerCase().includes(searchTerm)));
+                    feature.name.toLowerCase().includes(searchTerm) ||
+                    (feature.description && feature.description.toLowerCase().includes(searchTerm)) ||
+                    (feature.tags && feature.tags.some(tag => tag.toLowerCase().includes(searchTerm)));
 
                 const matchesLanguage =
-                    langFilter === 'all' || pattern.language === langFilter;
+                    langFilter === 'all' || feature.language === langFilter ||
+                    (feature.metadata?.languages && feature.metadata.languages.includes(langFilter));
 
-                const matchesFeature = patternMatchesFeature(pattern, featFilter);
+                const matchesCategory = featureMatchesCategory(feature, catFilter);
 
-                return matchesSearch && matchesLanguage && matchesFeature;
+                return matchesSearch && matchesLanguage && matchesCategory;
             });
 
-            sortPatterns();
+            sortFeatures();
         }
 
         /**
-         * Get the primary feature for a pattern (for sorting/grouping)
+         * Get the primary framework for a feature (for sorting/grouping)
          */
-        function getPatternFeature(pattern) {
-            // Priority: metadata.category > first tag > first word of name
-            if (pattern.metadata?.category) {
-                return pattern.metadata.category;
+        function getFeatureFramework(feature) {
+            if (feature.metadata?.framework) {
+                return feature.metadata.framework;
             }
 
-            if (pattern.tags && pattern.tags.length > 0) {
-                const firstTag = pattern.tags[0];
-                return firstTag
+            if (feature.tags && feature.tags.length > 0) {
+                return feature.tags[0]
                     .split('-')
                     .map(word => word.charAt(0).toUpperCase() + word.slice(1))
                     .join(' ');
             }
 
-            const nameWords = pattern.name.split(' ');
-            if (nameWords.length > 0 && nameWords[0].length > 2) {
-                return nameWords[0];
-            }
-
             return 'Other';
         }
 
-        function sortPatterns() {
-            const sortOption = sortBy.value;
+        function sortFeatures() {
+            const sortOption = sortBy ? sortBy.value : 'recent';
 
             if (sortOption === 'name') {
-                filteredPatterns.sort((a, b) => a.name.localeCompare(b.name));
+                filteredFeatures.sort((a, b) => a.name.localeCompare(b.name));
             } else if (sortOption === 'language') {
-                filteredPatterns.sort((a, b) => a.language.localeCompare(b.language));
+                filteredFeatures.sort((a, b) => a.language.localeCompare(b.language));
             } else if (sortOption === 'feature') {
-                filteredPatterns.sort((a, b) => {
-                    const featureA = getPatternFeature(a);
-                    const featureB = getPatternFeature(b);
-                    return featureA.localeCompare(featureB);
+                filteredFeatures.sort((a, b) => {
+                    const frameworkA = getFeatureFramework(a);
+                    const frameworkB = getFeatureFramework(b);
+                    return frameworkA.localeCompare(frameworkB);
                 });
             } else if (sortOption === 'recent') {
-                filteredPatterns.sort((a, b) => {
+                filteredFeatures.sort((a, b) => {
                     const dateA = new Date(a.savedAt || 0);
                     const dateB = new Date(b.savedAt || 0);
                     return dateB - dateA;
                 });
             }
 
-            renderPatterns();
+            renderFeatures();
         }
 
-        function renderPatterns() {
-            console.log('renderPatterns called, count:', filteredPatterns.length);
+        function renderFeatures() {
+            console.log('renderFeatures called, count:', filteredFeatures.length);
 
-            if (!patternList) {
-                console.error('Pattern list element not found');
+            if (!featureList) {
+                console.error('Feature list element not found');
                 return;
             }
 
-            if (filteredPatterns.length === 0) {
-                patternList.innerHTML = '<div class="empty-state">' +
-                    '<div class="empty-state-icon">📚</div>' +
-                    '<div class="empty-state-title">No Patterns Found</div>' +
-                    '<div class="empty-state-message">Save some patterns from chat or index your workspace</div>' +
+            if (filteredFeatures.length === 0) {
+                featureList.innerHTML = '<div class="empty-state">' +
+                    '<div class="empty-state-icon">📁</div>' +
+                    '<div class="empty-state-title">No Features Found</div>' +
+                    '<div class="empty-state-message">Index your workspace to discover features</div>' +
                     '</div>';
-                if (patternCount) {
-                    patternCount.textContent = 'No patterns';
+                if (featureCount) {
+                    featureCount.textContent = 'No features';
                 }
                 return;
             }
 
-            // Check if grouping by feature is enabled
-            const shouldGroupByFeature = groupByFeatureCheckbox ? groupByFeatureCheckbox.checked : false;
+            // Check if grouping by framework is enabled
+            const shouldGroup = groupByFrameworkCheckbox ? groupByFrameworkCheckbox.checked : false;
 
-            if (shouldGroupByFeature) {
-                // Group patterns by feature
-                const groupedPatterns = {};
-                filteredPatterns.forEach(pattern => {
-                    const feature = getPatternFeature(pattern);
-                    if (!groupedPatterns[feature]) {
-                        groupedPatterns[feature] = [];
+            if (shouldGroup) {
+                // Group features by framework
+                const groupedFeatures = {};
+                filteredFeatures.forEach(feature => {
+                    const framework = getFeatureFramework(feature);
+                    if (!groupedFeatures[framework]) {
+                        groupedFeatures[framework] = [];
                     }
-                    groupedPatterns[feature].push(pattern);
+                    groupedFeatures[framework].push(feature);
                 });
 
-                // Sort features alphabetically
-                const sortedFeatures = Object.keys(groupedPatterns).sort();
+                const sortedFrameworks = Object.keys(groupedFeatures).sort();
 
-                // Render grouped patterns
                 let html = '';
-                sortedFeatures.forEach(feature => {
-                    const patterns = groupedPatterns[feature];
+                sortedFrameworks.forEach(framework => {
+                    const features = groupedFeatures[framework];
                     html += '<div class="feature-group">';
-                    html += '<h3 class="feature-group-title">' + escapeHtml(feature) + ' <span class="feature-count">(' + patterns.length + ')</span></h3>';
+                    html += '<h3 class="feature-group-title">' + escapeHtml(framework) + ' <span class="feature-count">(' + features.length + ')</span></h3>';
                     html += '<div class="feature-group-patterns">';
-                    html += patterns.map(pattern => createPatternCard(pattern)).join('');
+                    html += features.map(feature => createFeatureCard(feature)).join('');
                     html += '</div>';
                     html += '</div>';
                 });
 
-                patternList.innerHTML = html;
+                featureList.innerHTML = html;
             } else {
-                // Render flat list
-                patternList.innerHTML = filteredPatterns.map(pattern => createPatternCard(pattern)).join('');
+                featureList.innerHTML = filteredFeatures.map(feature => createFeatureCard(feature)).join('');
             }
 
-            if (patternCount) {
-                patternCount.textContent = 'Showing ' + filteredPatterns.length + ' of ' + allPatterns.length + ' patterns';
+            if (featureCount) {
+                featureCount.textContent = 'Showing ' + filteredFeatures.length + ' of ' + allFeatures.length + ' features';
             }
 
-            // Attach event listeners to pattern cards
-            attachPatternCardListeners();
-
-            console.log('Patterns rendered successfully');
+            attachFeatureCardListeners();
+            console.log('Features rendered successfully');
         }
 
-        function createPatternCard(pattern) {
-            const icon = getLanguageIcon(pattern.language);
-            const tagsHtml = pattern.tags ? pattern.tags.map(tag => '<span class="tag">' + escapeHtml(tag) + '</span>').join('') : '';
-            const date = pattern.savedAt ? new Date(pattern.savedAt).toLocaleDateString() : 'Unknown';
-            const frameworkHtml = pattern.metadata?.framework ? '<span class="metadata-item">🔧 ' + pattern.metadata.framework + '</span>' : '';
+        function createFeatureCard(feature) {
+            const icon = getLanguageIcon(feature.language);
+            const tagsHtml = feature.tags ? feature.tags.slice(0, 5).map(tag => '<span class="tag">' + escapeHtml(tag) + '</span>').join('') : '';
+            const componentCount = feature.metadata?.componentCount || (feature.components ? feature.components.length : 0);
+            const languagesHtml = feature.metadata?.languages ? feature.metadata.languages.join(', ') : feature.language;
+            const frameworkHtml = feature.metadata?.framework ? '<span class="metadata-item">🔧 ' + feature.metadata.framework + '</span>' : '';
 
-            return '<div class="pattern-card" data-pattern-id="' + pattern.id + '">' +
+            return '<div class="pattern-card" data-feature-id="' + feature.id + '">' +
                 '<div class="pattern-card-header">' +
                 '<div class="pattern-title">' +
                 '<span class="pattern-icon">' + icon + '</span>' +
-                '<span class="pattern-name">' + escapeHtml(pattern.name) + '</span>' +
+                '<span class="pattern-name">' + escapeHtml(feature.name) + '</span>' +
                 '</div>' +
-                '<div class="pattern-language-badge">' + pattern.language + '</div>' +
+                '<div class="pattern-language-badge">' + languagesHtml + '</div>' +
                 '</div>' +
                 '<div class="pattern-card-body">' +
-                '<p class="pattern-description">' + escapeHtml(pattern.description || 'No description') + '</p>' +
+                '<p class="pattern-description">' + escapeHtml(feature.description || 'No description') + '</p>' +
                 '<div class="pattern-tags">' + tagsHtml + '</div>' +
                 '<div class="pattern-metadata">' +
-                '<span class="metadata-item">📅 ' + date + '</span>' +
+                '<span class="metadata-item">📦 ' + componentCount + ' components</span>' +
                 frameworkHtml +
                 '</div>' +
                 '</div>' +
                 '<div class="pattern-card-actions">' +
-                '<button class="card-action-btn view-btn" data-action="view" data-id="' + pattern.id + '">👁️ View</button>' +
-                '<button class="card-action-btn use-btn" data-action="use" data-id="' + pattern.id + '">💬 Use</button>' +
-                '<button class="card-action-btn delete-btn" data-action="delete" data-id="' + pattern.id + '">🗑️</button>' +
+                '<button class="card-action-btn view-btn" data-action="view" data-id="' + feature.id + '">👁️ View Code</button>' +
+                '<button class="card-action-btn use-btn" data-action="use" data-id="' + feature.id + '">💬 Use as Context</button>' +
                 '</div>' +
                 '</div>';
         }
 
-        function attachPatternCardListeners() {
+        function attachFeatureCardListeners() {
             document.querySelectorAll('.card-action-btn').forEach(btn => {
                 btn.addEventListener('click', (e) => {
                     e.stopPropagation();
                     const action = btn.getAttribute('data-action');
-                    const patternId = btn.getAttribute('data-id');
+                    const featureId = btn.getAttribute('data-id');
 
                     if (action === 'view') {
-                        viewPattern(patternId);
+                        viewFeature(featureId);
                     } else if (action === 'use') {
-                        usePattern(patternId);
-                    } else if (action === 'delete') {
-                        deletePattern(patternId);
+                        useFeature(featureId);
                     }
                 });
             });
         }
 
-        function viewPattern(patternId) {
-            const pattern = allPatterns.find(p => p.id === patternId);
-            if (pattern) {
-                const message = '**' + pattern.name + '** (' + pattern.language + ')\\\\n\\\\n' +
-                    pattern.description + '\\\\n\\\\n\`\`\`' + pattern.language + '\\\\n' + pattern.code + '\\\\n\`\`\`';
+        function viewFeature(featureId) {
+            const feature = allFeatures.find(f => f.id === featureId);
+            if (feature) {
+                const componentCount = feature.metadata?.componentCount || (feature.components ? feature.components.length : 0);
+                const message = '**📁 ' + feature.name + '** (' + feature.language + ')\\\\n\\\\n' +
+                    feature.description + '\\\\n\\\\n' +
+                    '**Components:** ' + componentCount + '\\\\n\\\\n' +
+                    '\`\`\`' + feature.language + '\\\\n' + feature.code + '\\\\n\`\`\`';
                 addMessage('assistant', message, false);
-                // Keep modal open so user can view more patterns
-                // patternBrowserModal.classList.remove('active');
             }
         }
 
-        function usePattern(patternId) {
-            const pattern = allPatterns.find(p => p.id === patternId);
-            if (pattern) {
-                input.value = 'Use the ' + pattern.name + ' pattern';
-                // Show feedback
-                showToast('✅ Pattern inserted into input field');
-                // Keep modal open so user can continue browsing
-                // patternBrowserModal.classList.remove('active');
+        function useFeature(featureId) {
+            const feature = allFeatures.find(f => f.id === featureId);
+            if (feature) {
+                // Close the modal
+                if (featureBrowserModal) {
+                    featureBrowserModal.classList.remove('active');
+                }
+
+                // Send to backend - VS Code native input box will prompt for the question
+                vscode.postMessage({
+                    type: 'useFeatureAsContext',
+                    feature: feature
+                });
             }
         }
 
@@ -2219,13 +2590,13 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
                     document.getElementById('stat-patterns').textContent = message.stats.patterns;
                     document.getElementById('stat-nodes').textContent = message.stats.nodes;
                     break;
-                case 'allPatterns':
-                    console.log('Received patterns:', message.patterns?.length || 0);
-                    allPatterns = message.patterns || [];
-                    filteredPatterns = allPatterns;
-                    populateFeatureFilter(); // Dynamically populate feature dropdown
-                    filterPatterns(); // Apply current filters and render
-                    console.log('Patterns rendered, filtered count:', filteredPatterns.length);
+                case 'allFeatures':
+                    console.log('Received features:', message.features?.length || 0);
+                    allFeatures = message.features || [];
+                    filteredFeatures = allFeatures;
+                    populateCategoryFilter(); // Dynamically populate category dropdown
+                    filterFeatures(); // Apply current filters and render
+                    console.log('Features rendered, filtered count:', filteredFeatures.length);
                     break;
             }
         });

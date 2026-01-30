@@ -101,96 +101,180 @@ export async function activate(context: vscode.ExtensionContext) {
 
             if (confirm === 'Reset Knowledge Base') {
                 await kbManager.clearAllData();
-                vscode.window.showInformationMessage('✅ Knowledge base has been reset. You can now re-index your workspace.');
+
+                // Verify reset by getting stats
+                const stats = await kbManager.getStats();
+                const message = stats.patternCount === 0 && stats.indexedFilesCount === 0
+                    ? '✅ Knowledge base has been reset successfully. You can now re-index your workspace.'
+                    : `⚠️ Reset completed but some data may remain: ${stats.patternCount} patterns, ${stats.indexedFilesCount} indexed files. Please try again or restart VS Code.`;
+
+                vscode.window.showInformationMessage(message);
             }
         })
     );
 
     context.subscriptions.push(
         vscode.commands.registerCommand('opencat.listPatterns', async () => {
-            const patterns = await kbManager.getAllPatterns();
+            // Show features instead of individual patterns
+            console.log('Browse KB: Fetching features...');
 
-            if (patterns.length === 0) {
-                vscode.window.showInformationMessage('No patterns saved. Run "OpenCat: Index Workspace" to get started!');
+            let features;
+            try {
+                features = await kbManager.getAllFeatures();
+                console.log(`Browse KB: Got ${features.length} features`);
+            } catch (error) {
+                console.error('Browse KB error:', error);
+                vscode.window.showErrorMessage(`Error fetching features: ${error}`);
                 return;
             }
 
-            // Enhanced items with more details
-            const items = patterns.map(p => {
-                const framework = p.metadata?.framework || 'none';
-                const category = p.metadata?.category || 'general';
-                const filePath = p.metadata?.filePath;
-                const relPath = filePath ? vscode.workspace.asRelativePath(filePath) : 'unknown';
+            if (features.length === 0) {
+                // Try to get feature stats to debug
+                const stats = await kbManager.getFeatureStats();
+                console.log('Browse KB: Feature stats:', JSON.stringify(stats));
+                vscode.window.showInformationMessage('No features found. Run "OpenCat: Index Workspace" to analyze your codebase!');
+                return;
+            }
+
+            // Build feature items with rich details
+            const items = features.map(f => {
+                const isFullStack = f.languages.includes('java') && f.languages.includes('typescript');
+                const stackIcon = isFullStack ? '$(globe)' : f.languages.includes('java') ? '$(server)' : '$(browser)';
+                const componentCount = f.components.length;
+                const frameworks = f.frameworks.length > 0 ? f.frameworks.join(', ') : 'none';
 
                 return {
-                    label: `$(symbol-${p.tags.includes('class') ? 'class' : p.tags.includes('method') ? 'method' : 'function'}) ${p.name}`,
-                    description: `${p.language} • ${framework} • ${category}`,
-                    detail: `📁 ${relPath} • 🏷️  ${p.tags.slice(0, 5).join(', ')}`,
-                    pattern: p
+                    label: `${stackIcon} ${f.name}`,
+                    description: `${f.languages.join(' + ')} • ${componentCount} components • ${frameworks}`,
+                    detail: `${f.description}`,
+                    feature: f
                 };
             });
 
             const selected = await vscode.window.showQuickPick(items, {
-                placeHolder: `Select from ${patterns.length} patterns`,
+                placeHolder: `Browse ${features.length} features in your knowledge base`,
                 matchOnDescription: true,
                 matchOnDetail: true
             });
 
             if (selected) {
                 const action = await vscode.window.showQuickPick([
-                    { label: '$(eye) View Code', action: 'view' },
-                    { label: '$(info) Show Details', action: 'details' },
-                    { label: '$(go-to-file) Open File', action: 'open' },
-                    { label: '$(trash) Delete', action: 'delete' }
+                    { label: '$(list-tree) View Components', action: 'components' },
+                    { label: '$(info) Show Feature Details', action: 'details' },
+                    { label: '$(git-merge) View Data Flow', action: 'flow' }
                 ], {
-                    placeHolder: `What do you want to do with "${selected.pattern.name}"?`
+                    placeHolder: `What do you want to see for "${selected.feature.name}"?`
                 });
 
-                if (action?.action === 'view') {
-                    const doc = await vscode.workspace.openTextDocument({
-                        content: selected.pattern.code,
-                        language: selected.pattern.language
+                if (action?.action === 'components') {
+                    // Get components for this feature
+                    const components = await kbManager.getComponentsForFeature(selected.feature.id);
+
+                    if (components.length === 0) {
+                        vscode.window.showInformationMessage('No components found for this feature.');
+                        return;
+                    }
+
+                    const componentItems = components.map(c => {
+                        const isEntryPoint = selected.feature.entryPoints.includes(c.id);
+                        const icon = isEntryPoint ? '$(rocket)' : c.type === 'service' ? '$(server)' : c.type === 'controller' ? '$(broadcast)' : '$(file-code)';
+                        const relPath = vscode.workspace.asRelativePath(c.filePath);
+
+                        return {
+                            label: `${icon} ${c.name}${isEntryPoint ? ' [Entry Point]' : ''}`,
+                            description: `${c.type} • ${c.language}`,
+                            detail: `${relPath}:${c.startLine}`,
+                            component: c
+                        };
                     });
-                    await vscode.window.showTextDocument(doc);
+
+                    const selectedComponent = await vscode.window.showQuickPick(componentItems, {
+                        placeHolder: `${components.length} components in "${selected.feature.name}"`
+                    });
+
+                    if (selectedComponent) {
+                        // Open the file at the component's line
+                        const doc = await vscode.workspace.openTextDocument(selectedComponent.component.filePath);
+                        const editor = await vscode.window.showTextDocument(doc);
+                        const line = selectedComponent.component.startLine - 1;
+                        editor.revealRange(new vscode.Range(line, 0, line, 0), vscode.TextEditorRevealType.InCenter);
+                        editor.selection = new vscode.Selection(line, 0, line, 0);
+                    }
                 } else if (action?.action === 'details') {
-                    // Show detailed information in output channel
-                    const outputChannel = vscode.window.createOutputChannel('OpenCat Pattern Details');
+                    // Show detailed feature information
+                    const outputChannel = vscode.window.createOutputChannel('OpenCat Feature Details');
                     outputChannel.clear();
-                    outputChannel.appendLine(`📋 Pattern Details: ${selected.pattern.name}\n`);
-                    outputChannel.appendLine(`ID: ${selected.pattern.id}`);
-                    outputChannel.appendLine(`Language: ${selected.pattern.language}`);
-                    outputChannel.appendLine(`Description: ${selected.pattern.description}`);
-                    outputChannel.appendLine(`Saved At: ${selected.pattern.savedAt}`);
-                    outputChannel.appendLine(`\n📁 File Information:`);
-                    outputChannel.appendLine(`   Path: ${selected.pattern.metadata?.filePath || 'N/A'}`);
-                    outputChannel.appendLine(`   Framework: ${selected.pattern.metadata?.framework || 'N/A'}`);
-                    outputChannel.appendLine(`   Category: ${selected.pattern.metadata?.category || 'N/A'}`);
-                    outputChannel.appendLine(`\n🏷️  Tags (${selected.pattern.tags.length}):`);
-                    selected.pattern.tags.forEach(tag => outputChannel.appendLine(`   • ${tag}`));
-                    outputChannel.appendLine(`\n💻 Code Preview:`);
-                    outputChannel.appendLine('─'.repeat(80));
-                    outputChannel.appendLine(selected.pattern.code.split('\n').slice(0, 30).join('\n'));
-                    if (selected.pattern.code.split('\n').length > 30) {
-                        outputChannel.appendLine('\n... (truncated)');
+                    outputChannel.appendLine(`🎯 Feature: ${selected.feature.name}\n`);
+                    outputChannel.appendLine('═'.repeat(60));
+                    outputChannel.appendLine(`ID: ${selected.feature.id}`);
+                    outputChannel.appendLine(`Description: ${selected.feature.description}`);
+                    outputChannel.appendLine(`Languages: ${selected.feature.languages.join(', ')}`);
+                    outputChannel.appendLine(`Frameworks: ${selected.feature.frameworks.join(', ') || 'none'}`);
+                    outputChannel.appendLine(`Tags: ${selected.feature.tags.slice(0, 10).join(', ')}`);
+
+                    outputChannel.appendLine(`\n📦 Components (${selected.feature.components.length}):`);
+                    outputChannel.appendLine('─'.repeat(60));
+
+                    const components = await kbManager.getComponentsForFeature(selected.feature.id);
+                    for (const comp of components) {
+                        const isEntry = selected.feature.entryPoints.includes(comp.id);
+                        const entryLabel = isEntry ? ' [ENTRY POINT]' : '';
+                        outputChannel.appendLine(`\n  ${comp.type.toUpperCase()}: ${comp.name}${entryLabel}`);
+                        outputChannel.appendLine(`    File: ${vscode.workspace.asRelativePath(comp.filePath)}:${comp.startLine}`);
+                        outputChannel.appendLine(`    Language: ${comp.language}`);
+                        if (comp.annotations.length > 0) {
+                            const anns = comp.annotations.filter(a => !a.startsWith('@param')).slice(0, 5);
+                            if (anns.length > 0) {
+                                outputChannel.appendLine(`    Annotations: ${anns.join(', ')}`);
+                            }
+                        }
+                        if (comp.dependencies.length > 0) {
+                            const deps = comp.dependencies.filter(d => d.endsWith('Service') || d.endsWith('Repository')).slice(0, 5);
+                            if (deps.length > 0) {
+                                outputChannel.appendLine(`    Dependencies: ${deps.join(', ')}`);
+                            }
+                        }
                     }
+
+                    if (selected.feature.flow.length > 0) {
+                        outputChannel.appendLine(`\n🔄 Data Flow:`);
+                        outputChannel.appendLine('─'.repeat(60));
+                        for (const flow of selected.feature.flow) {
+                            outputChannel.appendLine(`  ${flow.description || `${flow.from} -> ${flow.to}`}`);
+                        }
+                    }
+
                     outputChannel.show();
-                } else if (action?.action === 'open') {
-                    const filePath = selected.pattern.metadata?.filePath;
-                    if (filePath) {
-                        const doc = await vscode.workspace.openTextDocument(filePath);
-                        await vscode.window.showTextDocument(doc);
+                } else if (action?.action === 'flow') {
+                    // Show data flow visualization
+                    const outputChannel = vscode.window.createOutputChannel('OpenCat Data Flow');
+                    outputChannel.clear();
+                    outputChannel.appendLine(`🔄 Data Flow: ${selected.feature.name}\n`);
+                    outputChannel.appendLine('═'.repeat(60));
+
+                    if (selected.feature.flow.length === 0) {
+                        outputChannel.appendLine('No data flow connections found for this feature.');
                     } else {
-                        vscode.window.showWarningMessage('File path not available for this pattern');
+                        const components = await kbManager.getComponentsForFeature(selected.feature.id);
+                        const compMap = new Map(components.map(c => [c.id, c]));
+
+                        outputChannel.appendLine(`\nComponent Connections:\n`);
+                        for (const flow of selected.feature.flow) {
+                            const fromComp = compMap.get(flow.from);
+                            const toComp = compMap.get(flow.to);
+                            if (fromComp && toComp) {
+                                const fromLang = fromComp.language === 'java' ? '[Java]' : '[TS]';
+                                const toLang = toComp.language === 'java' ? '[Java]' : '[TS]';
+                                outputChannel.appendLine(`  ${fromLang} ${fromComp.name} (${fromComp.type})`);
+                                outputChannel.appendLine(`       │`);
+                                outputChannel.appendLine(`       └──[${flow.type}]──>`);
+                                outputChannel.appendLine(`              │`);
+                                outputChannel.appendLine(`  ${toLang} ${toComp.name} (${toComp.type})\n`);
+                            }
+                        }
                     }
-                } else if (action?.action === 'delete') {
-                    const confirm = await vscode.window.showWarningMessage(
-                        `Delete pattern "${selected.pattern.name}"?`,
-                        'Delete', 'Cancel'
-                    );
-                    if (confirm === 'Delete') {
-                        await kbManager.deletePattern(selected.pattern.id);
-                        vscode.window.showInformationMessage(`Deleted pattern "${selected.pattern.name}"`);
-                    }
+
+                    outputChannel.show();
                 }
             }
         })
