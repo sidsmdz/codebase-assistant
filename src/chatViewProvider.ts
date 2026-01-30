@@ -111,8 +111,10 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
         this._view?.webview.postMessage({
             type: 'updateStats',
             stats: {
+                features: stats.featureCount,
+                components: stats.componentCount,
                 patterns: stats.patternCount,
-                nodes: stats.astNodeCount,
+                files: stats.indexedFilesCount,
                 terms: stats.termCount
             }
         });
@@ -420,15 +422,52 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
         const detailedStats = await this._kbManager.getDetailedStats();
 
         let message = '📊 **Knowledge Base Statistics**\n\n';
-        message += `**Total:** ${detailedStats.totalPatterns} patterns, ${detailedStats.totalASTNodes} AST nodes\n\n`;
+        message += `**🧩 Features:** ${detailedStats.totalFeatures}\n`;
+        message += `**🔧 Components:** ${detailedStats.totalComponents}\n`;
+        message += `**🔀 Data Flows:** ${detailedStats.totalDataFlows}\n`;
+        message += `**📁 Indexed Files:** ${detailedStats.indexedFiles}\n`;
+        message += `**📝 Indexed Terms:** ${detailedStats.totalTerms}\n`;
 
-        if (Object.keys(detailedStats.patternsByLanguage).length > 0) {
-            message += '**By Language:**\n';
-            Object.entries(detailedStats.patternsByLanguage)
+        if (detailedStats.totalPatterns > 0) {
+            message += `**📦 Saved Patterns:** ${detailedStats.totalPatterns}\n`;
+        }
+        message += '\n';
+
+        if (Object.keys(detailedStats.featuresByLanguage).length > 0) {
+            message += '**💻 Features by Language:**\n';
+            Object.entries(detailedStats.featuresByLanguage)
                 .sort((a, b) => b[1] - a[1])
                 .forEach(([lang, count]) => {
-                    message += `• ${lang}: ${count}\n`;
+                    message += `  • ${lang}: ${count}\n`;
                 });
+            message += '\n';
+        }
+
+        if (Object.keys(detailedStats.componentsByType).length > 0) {
+            message += '**🏗️ Components by Type:**\n';
+            Object.entries(detailedStats.componentsByType)
+                .sort((a, b) => b[1] - a[1])
+                .forEach(([type, count]) => {
+                    message += `  • ${type}: ${count}\n`;
+                });
+            message += '\n';
+        }
+
+        if (Object.keys(detailedStats.featuresByFramework).length > 0) {
+            message += '**🛠️ Frameworks Detected:**\n';
+            Object.entries(detailedStats.featuresByFramework)
+                .sort((a, b) => b[1] - a[1])
+                .forEach(([fw, count]) => {
+                    message += `  • ${fw}: ${count} features\n`;
+                });
+            message += '\n';
+        }
+
+        if (detailedStats.topTags.length > 0) {
+            message += '**🏷️ Top Tags:**\n';
+            detailedStats.topTags.forEach(({ tag, count }) => {
+                message += `  • ${tag}: ${count}\n`;
+            });
         }
 
         this._view?.webview.postMessage({
@@ -2007,13 +2046,17 @@ ${userQuestion}
             <span>🐱 OpenCat</span>
         </div>
         <div id="kb-stats">
-            <div class="stat-item">
-                <span>📦</span>
-                <span id="stat-patterns">0</span>
+            <div class="stat-item" title="Features">
+                <span>🧩</span>
+                <span id="stat-features">0</span>
             </div>
-            <div class="stat-item">
-                <span>🌳</span>
-                <span id="stat-nodes">0</span>
+            <div class="stat-item" title="Components">
+                <span>🔧</span>
+                <span id="stat-components">0</span>
+            </div>
+            <div class="stat-item" title="Indexed Files">
+                <span>📁</span>
+                <span id="stat-files">0</span>
             </div>
         </div>
     </div>
@@ -2937,8 +2980,9 @@ ${userQuestion}
                     actionButtons.style.display = 'none';
                     break;
                 case 'updateStats':
-                    document.getElementById('stat-patterns').textContent = message.stats.patterns;
-                    document.getElementById('stat-nodes').textContent = message.stats.nodes;
+                    document.getElementById('stat-features').textContent = message.stats.features || 0;
+                    document.getElementById('stat-components').textContent = message.stats.components || 0;
+                    document.getElementById('stat-files').textContent = message.stats.files || 0;
                     break;
                 case 'allFeatures':
                     console.log('Received features:', message.features?.length || 0);

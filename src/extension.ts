@@ -36,15 +36,27 @@ export async function activate(context: vscode.ExtensionContext) {
 
             // Build detailed stats message
             let message = `📊 OpenCat Knowledge Base Statistics\n\n`;
-            message += `📦 Total Patterns: ${detailedStats.totalPatterns}\n`;
-            message += `🌳 AST Nodes: ${detailedStats.totalASTNodes}\n`;
-            message += `📝 Indexed Terms: ${detailedStats.totalTerms}\n`;
-            message += `📁 Indexed Files: ${detailedStats.indexedFiles}\n\n`;
 
-            // Languages breakdown
-            if (Object.keys(detailedStats.patternsByLanguage).length > 0) {
-                message += `💻 By Language:\n`;
-                Object.entries(detailedStats.patternsByLanguage)
+            // Features & Components (primary data from workspace scan)
+            message += `🧩 Features: ${detailedStats.totalFeatures}\n`;
+            message += `🔧 Components: ${detailedStats.totalComponents}\n`;
+            message += `🔀 Data Flows: ${detailedStats.totalDataFlows}\n`;
+            message += `📁 Indexed Files: ${detailedStats.indexedFiles}\n`;
+            message += `📝 Indexed Terms: ${detailedStats.totalTerms}\n`;
+
+            // Show patterns/AST only if they exist
+            if (detailedStats.totalPatterns > 0) {
+                message += `📦 Saved Patterns: ${detailedStats.totalPatterns}\n`;
+            }
+            if (detailedStats.totalASTNodes > 0) {
+                message += `🌳 AST Nodes: ${detailedStats.totalASTNodes}\n`;
+            }
+            message += `\n`;
+
+            // Features by language
+            if (Object.keys(detailedStats.featuresByLanguage).length > 0) {
+                message += `💻 Features by Language:\n`;
+                Object.entries(detailedStats.featuresByLanguage)
                     .sort((a, b) => b[1] - a[1])
                     .forEach(([lang, count]) => {
                         message += `   • ${lang}: ${count}\n`;
@@ -52,10 +64,10 @@ export async function activate(context: vscode.ExtensionContext) {
                 message += `\n`;
             }
 
-            // Node types breakdown
-            if (Object.keys(detailedStats.patternsByType).length > 0) {
-                message += `🔍 By Type:\n`;
-                Object.entries(detailedStats.patternsByType)
+            // Components by type
+            if (Object.keys(detailedStats.componentsByType).length > 0) {
+                message += `🏗️  Components by Type:\n`;
+                Object.entries(detailedStats.componentsByType)
                     .sort((a, b) => b[1] - a[1])
                     .forEach(([type, count]) => {
                         message += `   • ${type}: ${count}\n`;
@@ -63,13 +75,13 @@ export async function activate(context: vscode.ExtensionContext) {
                 message += `\n`;
             }
 
-            // Frameworks breakdown
-            if (Object.keys(detailedStats.patternsByFramework).length > 0) {
-                message += `🛠️  By Framework:\n`;
-                Object.entries(detailedStats.patternsByFramework)
+            // Features by framework
+            if (Object.keys(detailedStats.featuresByFramework).length > 0) {
+                message += `🛠️  Frameworks Detected:\n`;
+                Object.entries(detailedStats.featuresByFramework)
                     .sort((a, b) => b[1] - a[1])
                     .forEach(([fw, count]) => {
-                        message += `   • ${fw}: ${count}\n`;
+                        message += `   • ${fw}: ${count} features\n`;
                     });
                 message += `\n`;
             }

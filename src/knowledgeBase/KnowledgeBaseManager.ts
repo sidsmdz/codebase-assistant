@@ -239,11 +239,13 @@ export class KnowledgeBaseManager {
         astNodeCount: number;
         termCount: number;
         indexedFilesCount: number;
+        featureCount: number;
+        componentCount: number;
         path: string;
     }> {
         if (!this.isReady) {
             vscode.window.showErrorMessage('OpenCat Knowledge Base is not available.');
-            return { patternCount: 0, astNodeCount: 0, termCount: 0, indexedFilesCount: 0, path: 'N/A' };
+            return { patternCount: 0, astNodeCount: 0, termCount: 0, indexedFilesCount: 0, featureCount: 0, componentCount: 0, path: 'N/A' };
         }
 
         const result = this.db.exec(`
@@ -251,7 +253,9 @@ export class KnowledgeBaseManager {
                 (SELECT COUNT(*) FROM patterns) as pattern_count,
                 (SELECT COUNT(*) FROM ast_nodes) as ast_count,
                 (SELECT COUNT(DISTINCT term) FROM term_index) as term_count,
-                (SELECT COUNT(*) FROM indexed_files) as indexed_files_count
+                (SELECT COUNT(*) FROM indexed_files) as indexed_files_count,
+                (SELECT COUNT(*) FROM features) as feature_count,
+                (SELECT COUNT(*) FROM feature_components) as component_count
         `);
 
         const row = result[0]?.values[0];
@@ -260,6 +264,8 @@ export class KnowledgeBaseManager {
             astNodeCount: (row?.[1] as number) || 0,
             termCount: (row?.[2] as number) || 0,
             indexedFilesCount: (row?.[3] as number) || 0,
+            featureCount: (row?.[4] as number) || 0,
+            componentCount: (row?.[5] as number) || 0,
             path: this.dbPath
         };
     }
@@ -570,6 +576,12 @@ export class KnowledgeBaseManager {
         totalASTNodes: number;
         totalTerms: number;
         indexedFiles: number;
+        totalFeatures: number;
+        totalComponents: number;
+        totalDataFlows: number;
+        featuresByLanguage: { [key: string]: number };
+        componentsByType: { [key: string]: number };
+        featuresByFramework: { [key: string]: number };
         patternsByLanguage: { [key: string]: number };
         patternsByType: { [key: string]: number };
         patternsByFramework: { [key: string]: number };
@@ -581,6 +593,12 @@ export class KnowledgeBaseManager {
                 totalASTNodes: 0,
                 totalTerms: 0,
                 indexedFiles: 0,
+                totalFeatures: 0,
+                totalComponents: 0,
+                totalDataFlows: 0,
+                featuresByLanguage: {},
+                componentsByType: {},
+                featuresByFramework: {},
                 patternsByLanguage: {},
                 patternsByType: {},
                 patternsByFramework: {},
@@ -589,17 +607,52 @@ export class KnowledgeBaseManager {
         }
 
         try {
-            // Basic counts
+            // Basic counts including features and components
             const basicResult = this.db.exec(`
                 SELECT
                     (SELECT COUNT(*) FROM patterns) as pattern_count,
                     (SELECT COUNT(*) FROM ast_nodes) as ast_count,
                     (SELECT COUNT(DISTINCT term) FROM term_index) as term_count,
-                    (SELECT COUNT(*) FROM indexed_files) as file_count
+                    (SELECT COUNT(*) FROM indexed_files) as file_count,
+                    (SELECT COUNT(*) FROM features) as feature_count,
+                    (SELECT COUNT(*) FROM feature_components) as component_count
             `);
             const basicRow = basicResult[0]?.values[0];
 
-            // Patterns by language
+            // Feature-level stats
+            const features = await this.getAllFeatures();
+            const featuresByLanguage: { [key: string]: number } = {};
+            const featuresByFramework: { [key: string]: number } = {};
+            const tagCounts: { [key: string]: number } = {};
+            let totalDataFlows = 0;
+
+            features.forEach(f => {
+                // Count by language
+                f.languages.forEach(lang => {
+                    featuresByLanguage[lang] = (featuresByLanguage[lang] || 0) + 1;
+                });
+                // Count by framework
+                f.frameworks.forEach(fw => {
+                    featuresByFramework[fw] = (featuresByFramework[fw] || 0) + 1;
+                });
+                // Count tags
+                f.tags.forEach(tag => {
+                    tagCounts[tag] = (tagCounts[tag] || 0) + 1;
+                });
+                // Count data flows
+                totalDataFlows += f.flow?.length || 0;
+            });
+
+            // Components by type
+            const compTypeResult = this.db.exec("SELECT component_type, COUNT(*) as count FROM feature_components GROUP BY component_type ORDER BY count DESC");
+            const componentsByType: { [key: string]: number } = {};
+            if (compTypeResult[0]) {
+                compTypeResult[0].values.forEach(row => {
+                    componentsByType[row[0] as string] = row[1] as number;
+                });
+            }
+
+            // Patterns by language (legacy)
             const langResult = this.db.exec("SELECT language, COUNT(*) as count FROM patterns GROUP BY language");
             const patternsByLanguage: { [key: string]: number } = {};
             if (langResult[0]) {
@@ -608,7 +661,7 @@ export class KnowledgeBaseManager {
                 });
             }
 
-            // Patterns by node type
+            // Patterns by node type (legacy)
             const typeResult = this.db.exec("SELECT node_type, COUNT(*) as count FROM ast_nodes GROUP BY node_type");
             const patternsByType: { [key: string]: number } = {};
             if (typeResult[0]) {
@@ -617,10 +670,9 @@ export class KnowledgeBaseManager {
                 });
             }
 
-            // Patterns by framework (from metadata)
+            // Patterns by framework (legacy)
             const patterns = await this.getAllPatterns();
             const patternsByFramework: { [key: string]: number } = {};
-            const tagCounts: { [key: string]: number } = {};
 
             patterns.forEach(p => {
                 if (p.metadata?.framework) {
@@ -642,6 +694,12 @@ export class KnowledgeBaseManager {
                 totalASTNodes: (basicRow?.[1] as number) || 0,
                 totalTerms: (basicRow?.[2] as number) || 0,
                 indexedFiles: (basicRow?.[3] as number) || 0,
+                totalFeatures: (basicRow?.[4] as number) || 0,
+                totalComponents: (basicRow?.[5] as number) || 0,
+                totalDataFlows,
+                featuresByLanguage,
+                componentsByType,
+                featuresByFramework,
                 patternsByLanguage,
                 patternsByType,
                 patternsByFramework,
@@ -654,6 +712,12 @@ export class KnowledgeBaseManager {
                 totalASTNodes: 0,
                 totalTerms: 0,
                 indexedFiles: 0,
+                totalFeatures: 0,
+                totalComponents: 0,
+                totalDataFlows: 0,
+                featuresByLanguage: {},
+                componentsByType: {},
+                featuresByFramework: {},
                 patternsByLanguage: {},
                 patternsByType: {},
                 patternsByFramework: {},
