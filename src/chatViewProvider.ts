@@ -538,13 +538,21 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
                     languages: feature.languages,
                     entryPoints: feature.entryPoints
                 },
-                // Include component details for richer display
+                // Data flow information
+                flow: feature.flow || [],
+                // Include component details with dependencies for richer context
                 components: components.map(c => ({
                     id: c.id,
                     name: c.name,
                     type: c.type,
                     filePath: c.filePath,
-                    language: c.language
+                    language: c.language,
+                    startLine: c.startLine,
+                    endLine: c.endLine,
+                    dependencies: c.dependencies || [],
+                    dependents: c.dependents || [],
+                    annotations: c.annotations || [],
+                    code: c.code || ''
                 }))
             };
         }));
@@ -590,35 +598,124 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
             const componentCount = feature.metadata?.componentCount || 0;
             const languages = feature.metadata?.languages?.join(', ') || feature.language;
             const frameworks = feature.tags?.filter((t: string) => !['feature', 'workspace-scanned'].includes(t)).slice(0, 3).join(', ') || 'none';
+            const flowCount = feature.flow?.length || 0;
+            const entryPoints = feature.metadata?.entryPoints || [];
+            const components = feature.components || [];
+
+            // Build data flow summary for display
+            let flowSummary = '';
+            if (flowCount > 0) {
+                flowSummary = `• Data Flow: ${flowCount} connections\n`;
+            }
+
+            // Count dependencies
+            let totalDeps = 0;
+            components.forEach((c: any) => { totalDeps += (c.dependencies?.length || 0); });
 
             const contextSummary = `📁 **Feature Context: ${feature.name}**
 • Components: ${componentCount}
 • Languages: ${languages}
 • Tags: ${frameworks}
+${flowSummary}• Dependencies tracked: ${totalDeps}
+• Entry points: ${entryPoints.length}
 • Code length: ${feature.code?.length || 0} characters`;
 
             // Show context being sent
             this._view?.webview.postMessage({
                 type: 'addMessage',
                 role: 'assistant',
-                content: `🔍 **Using Feature as Context**\n\n${contextSummary}\n\n🤖 Asking Copilot with this context...`
+                content: `🔍 **Using Feature as Context**\n\n${contextSummary}\n\n🤖 Asking Copilot with full data flow context...`
             });
 
-            // Build the enriched prompt with feature context
-            const enrichedPrompt = `You are a helpful code assistant. The user is asking about code in their workspace.
+            // Build rich prompt with data flow, component layers, and dependencies
+            let enrichedPrompt = `You are a helpful code assistant with deep knowledge of the project's codebase.
 
---- FEATURE CONTEXT: ${feature.name} ---
-Description: ${feature.description || 'No description'}
-Languages: ${languages}
-Components: ${componentCount}
+============================================================
+FEATURE: ${feature.name}
+============================================================
 
---- CODE FROM THIS FEATURE ---
-${feature.code}
+**Description:** ${feature.description || 'No description'}
+**Languages:** ${languages}
+**Frameworks:** ${frameworks}
+**Tags:** ${feature.tags?.join(', ') || 'none'}
 
---- USER QUESTION ---
+`;
+
+            // Add data flow diagram
+            if (feature.flow && feature.flow.length > 0) {
+                enrichedPrompt += `### Data Flow:\n\`\`\`\n`;
+                for (const flow of feature.flow) {
+                    enrichedPrompt += `${flow.description || `${flow.from} -[${flow.type || 'calls'}]-> ${flow.to}`}\n`;
+                }
+                enrichedPrompt += `\`\`\`\n\n`;
+            }
+
+            // Add components sorted by architectural layer
+            if (components.length > 0) {
+                const layerOrder: Record<string, number> = {
+                    'controller': 1, 'component': 1, 'hook': 1,
+                    'event-handler': 2, 'middleware': 2,
+                    'service': 3, 'api-client': 4,
+                    'repository': 5, 'model': 6,
+                    'util': 7, 'config': 8, 'unknown': 9
+                };
+
+                const sorted = [...components].sort((a: any, b: any) => {
+                    const aEntry = entryPoints.includes(a.id) ? 0 : 1;
+                    const bEntry = entryPoints.includes(b.id) ? 0 : 1;
+                    if (aEntry !== bEntry) { return aEntry - bEntry; }
+                    return (layerOrder[a.type] || 9) - (layerOrder[b.type] || 9);
+                });
+
+                enrichedPrompt += `### Components (${components.length}):\n\n`;
+
+                for (const comp of sorted) {
+                    const isEntry = entryPoints.includes(comp.id);
+                    const entryLabel = isEntry ? ' [ENTRY POINT]' : '';
+
+                    enrichedPrompt += `#### ${(comp.type || 'unknown').toUpperCase()}: ${comp.name}${entryLabel}\n`;
+                    enrichedPrompt += `- **File:** ${comp.filePath?.split('/').slice(-2).join('/') || 'unknown'}:${comp.startLine || 0}\n`;
+                    enrichedPrompt += `- **Language:** ${comp.language || 'unknown'}\n`;
+
+                    if (comp.annotations?.length > 0) {
+                        const relevant = comp.annotations.filter((a: string) => !a.startsWith('@param') && !a.startsWith('@return')).slice(0, 5);
+                        if (relevant.length > 0) {
+                            enrichedPrompt += `- **Annotations:** ${relevant.join(', ')}\n`;
+                        }
+                    }
+
+                    if (comp.dependencies?.length > 0) {
+                        enrichedPrompt += `- **Dependencies:** ${comp.dependencies.slice(0, 8).join(', ')}\n`;
+                    }
+
+                    if (comp.dependents?.length > 0) {
+                        enrichedPrompt += `- **Used by:** ${comp.dependents.slice(0, 5).join(', ')}\n`;
+                    }
+
+                    // Include the code (truncated if too large)
+                    if (comp.code) {
+                        const maxLen = 2000;
+                        enrichedPrompt += `\n\`\`\`${comp.language || 'text'}\n`;
+                        if (comp.code.length > maxLen) {
+                            enrichedPrompt += comp.code.substring(0, maxLen) + '\n// ... (truncated)\n';
+                        } else {
+                            enrichedPrompt += comp.code;
+                        }
+                        enrichedPrompt += `\n\`\`\`\n\n`;
+                    }
+                }
+            } else {
+                // Fallback to aggregated code
+                enrichedPrompt += `### Code:\n\`\`\`${feature.language || 'text'}\n${feature.code}\n\`\`\`\n\n`;
+            }
+
+            enrichedPrompt += `============================================================
+USER QUESTION
+============================================================
+
 ${userQuestion}
 
-Please answer the user's question using the feature context above. Reference specific parts of the code when relevant.`;
+**Instructions:** Answer the user's question using the full feature context above — including the data flow, component architecture, dependencies, and code. Reference specific components, their relationships, and file locations when relevant.`;
 
             this.lastQuery = userQuestion;
             this.lastEnrichedPrompt = enrichedPrompt;
@@ -1081,14 +1178,54 @@ Please answer the user's question using the feature context above. Reference spe
 
         /* Code blocks */
         pre {
-            background-color: rgba(0, 0, 0, 0.3);
+            background-color: rgba(0, 0, 0, 0.35);
             border: 1px solid rgba(255, 255, 255, 0.1);
             border-radius: 8px;
-            padding: 14px;
+            padding: 0;
             overflow-x: auto;
             margin: 10px 0;
             position: relative;
             border-left: 3px solid var(--vscode-focusBorder);
+        }
+
+        pre.code-block code {
+            display: block;
+            padding: 14px;
+        }
+
+        .code-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 6px 12px;
+            background: rgba(255, 255, 255, 0.05);
+            border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+            border-radius: 8px 8px 0 0;
+        }
+
+        .code-lang {
+            font-size: 10px;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            color: var(--vscode-textLink-foreground);
+            opacity: 0.8;
+        }
+
+        .code-copy-btn {
+            font-size: 11px;
+            padding: 2px 8px;
+            background: transparent;
+            color: var(--vscode-descriptionForeground);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 4px;
+            cursor: pointer;
+            transition: all 0.15s;
+        }
+
+        .code-copy-btn:hover {
+            background: rgba(255, 255, 255, 0.1);
+            color: var(--vscode-foreground);
         }
 
         code {
@@ -1105,6 +1242,33 @@ Please answer the user's question using the feature context above. Reference spe
             padding: 1px 5px;
             font-size: 12px;
             color: var(--vscode-textLink-foreground);
+        }
+
+        /* Syntax highlighting colors */
+        .hl-keyword {
+            color: #c586c0;
+            font-weight: 600;
+        }
+
+        .hl-string {
+            color: #ce9178;
+        }
+
+        .hl-comment {
+            color: #6a9955;
+            font-style: italic;
+        }
+
+        .hl-number {
+            color: #b5cea8;
+        }
+
+        .hl-type {
+            color: #4ec9b0;
+        }
+
+        .hl-annotation {
+            color: #dcdcaa;
         }
 
         .code-header {
@@ -2029,6 +2193,66 @@ Please answer the user's question using the feature context above. Reference spe
             });
         });
 
+        // Syntax highlighting for code blocks
+        function highlightCode(escapedCode, lang) {
+            if (!lang || lang === 'text') return escapedCode;
+            try {
+                var kwMap = {
+                    java: ['abstract','assert','boolean','break','byte','case','catch','char','class','const','continue','default','do','double','else','enum','extends','final','finally','float','for','if','implements','import','instanceof','int','interface','long','native','new','package','private','protected','public','return','short','static','super','switch','synchronized','this','throw','throws','transient','try','void','volatile','while'],
+                    typescript: ['abstract','any','as','async','await','boolean','break','case','catch','class','const','constructor','continue','declare','default','delete','do','else','enum','export','extends','false','finally','for','from','function','get','if','implements','import','in','instanceof','interface','is','keyof','let','module','namespace','never','new','null','number','of','private','protected','public','readonly','return','set','static','string','super','switch','this','throw','true','try','type','typeof','undefined','var','void','while','yield'],
+                    javascript: ['async','await','break','case','catch','class','const','continue','default','delete','do','else','export','extends','false','finally','for','from','function','if','import','in','instanceof','let','new','null','of','return','static','super','switch','this','throw','true','try','typeof','undefined','var','void','while','yield'],
+                    python: ['False','None','True','and','as','assert','async','await','break','class','continue','def','del','elif','else','except','finally','for','from','global','if','import','in','is','lambda','not','or','pass','raise','return','try','while','with','yield'],
+                    go: ['break','case','chan','const','continue','default','defer','else','for','func','go','goto','if','import','interface','map','package','range','return','select','struct','switch','type','var'],
+                    sql: ['SELECT','FROM','WHERE','AND','OR','NOT','INSERT','INTO','VALUES','UPDATE','SET','DELETE','CREATE','TABLE','ALTER','DROP','JOIN','LEFT','RIGHT','INNER','OUTER','ON','GROUP','BY','ORDER','ASC','DESC','HAVING','LIMIT','AS','DISTINCT','EXISTS','IN','BETWEEN','LIKE','IS','NULL','PRIMARY','KEY','DEFAULT','CASE','WHEN','THEN','END']
+                };
+                var langKey = lang.toLowerCase();
+                if (langKey === 'ts' || langKey === 'tsx') langKey = 'typescript';
+                if (langKey === 'js' || langKey === 'jsx') langKey = 'javascript';
+                if (langKey === 'py') langKey = 'python';
+                var kws = kwMap[langKey] || kwMap['typescript'];
+
+                // Tokenize line by line for safety
+                var lines = escapedCode.split('\\n');
+                var out = [];
+                for (var li = 0; li < lines.length; li++) {
+                    var line = lines[li];
+                    // Check for single-line comment
+                    var commentIdx = line.indexOf('//');
+                    if (langKey === 'python' || langKey === 'bash' || langKey === 'sh') {
+                        commentIdx = line.indexOf('#');
+                    }
+                    var codePart = commentIdx >= 0 ? line.substring(0, commentIdx) : line;
+                    var commentPart = commentIdx >= 0 ? '<span class="hl-comment">' + line.substring(commentIdx) + '</span>' : '';
+
+                    // Highlight strings in code part (simple: match "..." and '...')
+                    codePart = codePart.replace(/(&quot;[^&]*?&quot;)/g, '<span class="hl-string">$1</span>');
+                    codePart = codePart.replace(/(&#x27;[^&]*?&#x27;)/g, '<span class="hl-string">$1</span>');
+
+                    // Highlight annotations (@Word)
+                    codePart = codePart.replace(/(@[A-Za-z_][A-Za-z0-9_]*)/g, '<span class="hl-annotation">$1</span>');
+
+                    // Highlight numbers (standalone digits)
+                    codePart = codePart.replace(/(?<![A-Za-z_])([0-9]+\\.?[0-9]*)(?![A-Za-z_])/g, '<span class="hl-number">$1</span>');
+
+                    // Highlight keywords (word boundary via split on non-word chars)
+                    for (var ki = 0; ki < kws.length; ki++) {
+                        var kw = kws[ki];
+                        // Match whole word only using a regex with word boundaries
+                        var kwRe = new RegExp('(?<![A-Za-z0-9_])(' + kw + ')(?![A-Za-z0-9_])', 'g');
+                        codePart = codePart.replace(kwRe, '<span class="hl-keyword">$1</span>');
+                    }
+
+                    // Highlight types (PascalCase)
+                    codePart = codePart.replace(/(?<![A-Za-z0-9_"&;])([A-Z][a-zA-Z0-9_]+)(?![A-Za-z0-9_])/g, '<span class="hl-type">$1</span>');
+
+                    out.push(codePart + commentPart);
+                }
+                return out.join('\\n');
+            } catch(e) {
+                return escapedCode;
+            }
+        }
+
         function addMessage(role, content, showActions = false, quickActionsList = null) {
             if (!hasMessages) {
                 messagesDiv.classList.remove('hidden');
@@ -2045,9 +2269,11 @@ Please answer the user's question using the feature context above. Reference spe
             // Enhanced markdown rendering
             let processedContent = content;
 
-            // Process code blocks
-            processedContent = processedContent.replace(/\`\`\`(\\w+)?\\n([\\s\\S]*?)\`\`\`/g, (match, lang, code) => {
-                return \`<pre><code class="language-\${lang || 'text'}">\${escapeHtml(code.trim())}</code></pre>\`;
+            // Process code blocks with syntax highlighting
+            processedContent = processedContent.replace(/\`\`\`(\\w+)?\\n([\\s\\S]*?)\`\`\`/g, function(match, lang, code) {
+                var language = lang || 'text';
+                var highlighted = highlightCode(escapeHtml(code.trim()), language);
+                return '<pre class="code-block"><div class="code-header"><span class="code-lang">' + language + '</span><button class="code-copy-btn">Copy</button></div><code class="language-' + language + '">' + highlighted + '</code></pre>';
             });
 
             // Process inline code
@@ -2060,6 +2286,19 @@ Please answer the user's question using the feature context above. Reference spe
             processedContent = processedContent.replace(/^  • (.+)$/gm, '<div style="margin-left: 16px;">• $1</div>');
 
             contentDiv.innerHTML = processedContent;
+
+            // Attach copy handlers to code block copy buttons
+            contentDiv.querySelectorAll('.code-copy-btn').forEach(function(btn) {
+                btn.addEventListener('click', function() {
+                    var codeEl = btn.closest('pre').querySelector('code');
+                    if (codeEl) {
+                        navigator.clipboard.writeText(codeEl.textContent || '');
+                        btn.textContent = 'Copied!';
+                        setTimeout(function() { btn.textContent = 'Copy'; }, 1500);
+                    }
+                });
+            });
+
             messageDiv.appendChild(contentDiv);
 
             if (showActions && role === 'assistant') {
