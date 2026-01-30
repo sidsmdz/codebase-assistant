@@ -1,0 +1,786 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>OpenCat - AI Code Assistant Demo</title>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&family=Fira+Code:wght@400;500&display=swap');
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: 'Inter', -apple-system, sans-serif;
+            background: #0d1117; color: #e6edf3;
+            overflow: hidden; width: 100vw; height: 100vh;
+        }
+        .slide-container { position: relative; width: 100vw; height: 100vh; }
+        .slide {
+            position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+            display: flex; flex-direction: column; justify-content: center; align-items: center;
+            opacity: 0; transform: scale(0.95);
+            transition: opacity 0.6s ease, transform 0.6s ease;
+            pointer-events: none; padding: 50px 70px;
+        }
+        .slide.active { opacity: 1; transform: scale(1); pointer-events: all; }
+
+        /* Progress */
+        .progress-bar {
+            position: fixed; top: 0; left: 0; height: 4px;
+            background: linear-gradient(90deg, #58a6ff, #a371f7, #f778ba);
+            z-index: 100; transition: width 0.2s linear; border-radius: 0 2px 2px 0;
+        }
+        .slide-counter {
+            position: fixed; bottom: 16px; right: 24px;
+            font-size: 13px; color: #484f58; font-weight: 500; z-index: 100;
+        }
+
+        /* Pause/Resume button */
+        .pause-btn {
+            position: fixed; bottom: 14px; left: 50%; transform: translateX(-50%);
+            z-index: 200; background: #21262d; border: 1px solid #30363d;
+            color: #c9d1d9; padding: 8px 24px; border-radius: 20px;
+            font-size: 13px; font-weight: 600; cursor: pointer;
+            font-family: 'Inter', sans-serif;
+            display: flex; align-items: center; gap: 8px;
+            transition: all 0.2s;
+        }
+        .pause-btn:hover { background: #30363d; border-color: #484f58; }
+        .pause-btn .dot {
+            width: 8px; height: 8px; border-radius: 50%;
+            background: #3fb950; transition: background 0.2s;
+        }
+        .pause-btn.paused .dot { background: #f85149; }
+
+        .controls-hint {
+            position: fixed; bottom: 16px; left: 24px;
+            font-size: 11px; color: #484f58; z-index: 100;
+        }
+        .controls-hint kbd {
+            background: #21262d; border: 1px solid #30363d; border-radius: 3px;
+            padding: 1px 5px; font-family: 'Fira Code', monospace; font-size: 10px;
+        }
+
+        /* ===== COMMON STYLES ===== */
+        .section-header {
+            font-size: 13px; font-weight: 700; text-transform: uppercase;
+            letter-spacing: 3px; color: #58a6ff; margin-bottom: 12px;
+        }
+        .slide-title {
+            font-size: 44px; font-weight: 800; margin-bottom: 10px;
+            letter-spacing: -1px; text-align: center;
+        }
+        .slide-subtitle {
+            font-size: 18px; color: #8b949e; margin-bottom: 40px;
+            text-align: center; max-width: 680px; line-height: 1.5;
+        }
+
+        /* Title slide */
+        .title-slide { background: radial-gradient(ellipse at center, #161b22 0%, #0d1117 100%); }
+        .title-logo { font-size: 80px; margin-bottom: 14px; animation: float 3s ease-in-out infinite; }
+        @keyframes float { 0%,100%{transform:translateY(0)} 50%{transform:translateY(-12px)} }
+        .title-name {
+            font-size: 64px; font-weight: 900;
+            background: linear-gradient(135deg, #58a6ff, #a371f7, #f778ba);
+            -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+            margin-bottom: 12px; letter-spacing: -2px;
+        }
+        .title-tagline { font-size: 22px; color: #8b949e; margin-bottom: 30px; }
+        .title-version {
+            font-size: 13px; color: #484f58; background: #21262d;
+            padding: 6px 16px; border-radius: 20px; border: 1px solid #30363d;
+        }
+
+        /* Feature grid */
+        .feature-grid {
+            display: grid; grid-template-columns: repeat(3, 1fr);
+            gap: 18px; width: 100%; max-width: 1050px;
+        }
+        .feature-card {
+            background: #161b22; border: 1px solid #30363d; border-radius: 14px;
+            padding: 24px; opacity: 0; transform: translateY(25px);
+            transition: all 0.4s ease;
+        }
+        .slide.active .feature-card { opacity: 1; transform: translateY(0); }
+        .feature-card:nth-child(1){transition-delay:.15s} .feature-card:nth-child(2){transition-delay:.25s}
+        .feature-card:nth-child(3){transition-delay:.35s} .feature-card:nth-child(4){transition-delay:.45s}
+        .feature-card:nth-child(5){transition-delay:.55s} .feature-card:nth-child(6){transition-delay:.65s}
+        .feature-icon { font-size: 30px; margin-bottom: 10px; }
+        .feature-name { font-size: 16px; font-weight: 700; margin-bottom: 6px; }
+        .feature-desc { font-size: 13px; color: #8b949e; line-height: 1.5; }
+
+        /* Flow diagram */
+        .flow-container { display:flex; align-items:center; gap:0; flex-wrap:wrap; justify-content:center; max-width:1050px; }
+        .flow-step {
+            background:#161b22; border:1px solid #30363d; border-radius:10px;
+            padding:16px 22px; text-align:center; min-width:140px;
+            opacity:0; transform:translateX(-15px);
+        }
+        .slide.active .flow-step { opacity:1; transform:translateX(0); }
+        .flow-step:nth-child(1){transition:all .4s ease .1s} .flow-step:nth-child(2){transition:all .4s ease .3s}
+        .flow-step:nth-child(3){transition:all .4s ease .5s} .flow-step:nth-child(4){transition:all .4s ease .7s}
+        .flow-step:nth-child(5){transition:all .4s ease .9s} .flow-step:nth-child(6){transition:all .4s ease 1.1s}
+        .flow-step:nth-child(7){transition:all .4s ease 1.3s} .flow-step:nth-child(8){transition:all .4s ease 1.5s}
+        .flow-step:nth-child(9){transition:all .4s ease 1.7s}
+        .flow-icon { font-size: 24px; margin-bottom: 6px; }
+        .flow-label { font-size: 12px; font-weight: 600; }
+        .flow-detail { font-size: 10px; color: #8b949e; margin-top: 3px; }
+        .flow-arrow { font-size:20px; color:#58a6ff; opacity:0; margin:0 2px; }
+        .slide.active .flow-arrow { opacity:1; transition:opacity .3s ease; }
+
+        /* Stats bar */
+        .stats-bar { display:flex; gap:36px; margin-bottom:40px; }
+        .stat-box { text-align:center; opacity:0; transform:translateY(15px); }
+        .slide.active .stat-box { opacity:1; transform:translateY(0); }
+        .stat-box:nth-child(1){transition:all .3s ease .1s} .stat-box:nth-child(2){transition:all .3s ease .25s}
+        .stat-box:nth-child(3){transition:all .3s ease .4s} .stat-box:nth-child(4){transition:all .3s ease .55s}
+        .stat-number {
+            font-size: 42px; font-weight: 900;
+            background: linear-gradient(135deg, #58a6ff, #a371f7);
+            -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+        }
+        .stat-label { font-size: 12px; color: #8b949e; font-weight: 500; margin-top: 2px; }
+
+        /* Two column */
+        .two-col { display:grid; grid-template-columns:1fr 1fr; gap:36px; max-width:1050px; width:100%; }
+        .col-title { font-size:20px; font-weight:700; margin-bottom:16px; display:flex; align-items:center; gap:8px; }
+        .col-list { list-style:none; }
+        .col-list li {
+            padding:8px 0; border-bottom:1px solid #21262d; font-size:14px; color:#c9d1d9;
+            display:flex; align-items:center; gap:8px; opacity:0; transform:translateY(8px);
+        }
+        .slide.active .col-list li { opacity:1; transform:translateY(0); }
+        .two-col>div:first-child .col-list li:nth-child(1){transition:all .25s ease .15s}
+        .two-col>div:first-child .col-list li:nth-child(2){transition:all .25s ease .25s}
+        .two-col>div:first-child .col-list li:nth-child(3){transition:all .25s ease .35s}
+        .two-col>div:first-child .col-list li:nth-child(4){transition:all .25s ease .45s}
+        .two-col>div:first-child .col-list li:nth-child(5){transition:all .25s ease .55s}
+        .two-col>div:first-child .col-list li:nth-child(6){transition:all .25s ease .65s}
+        .two-col>div:last-child .col-list li:nth-child(1){transition:all .25s ease .2s}
+        .two-col>div:last-child .col-list li:nth-child(2){transition:all .25s ease .3s}
+        .two-col>div:last-child .col-list li:nth-child(3){transition:all .25s ease .4s}
+        .two-col>div:last-child .col-list li:nth-child(4){transition:all .25s ease .5s}
+        .two-col>div:last-child .col-list li:nth-child(5){transition:all .25s ease .6s}
+        .two-col>div:last-child .col-list li:nth-child(6){transition:all .25s ease .7s}
+        .li-icon { font-size:16px; }
+
+        /* Tech grid */
+        .tech-grid { display:grid; grid-template-columns:repeat(4,1fr); gap:16px; max-width:850px; width:100%; }
+        .tech-card {
+            background:#161b22; border:1px solid #30363d; border-radius:10px;
+            padding:20px; text-align:center; opacity:0; transform:scale(.85);
+        }
+        .slide.active .tech-card { opacity:1; transform:scale(1); }
+        .tech-card:nth-child(1){transition:all .3s ease .1s} .tech-card:nth-child(2){transition:all .3s ease .18s}
+        .tech-card:nth-child(3){transition:all .3s ease .26s} .tech-card:nth-child(4){transition:all .3s ease .34s}
+        .tech-card:nth-child(5){transition:all .3s ease .42s} .tech-card:nth-child(6){transition:all .3s ease .50s}
+        .tech-card:nth-child(7){transition:all .3s ease .58s} .tech-card:nth-child(8){transition:all .3s ease .66s}
+        .tech-icon { font-size:28px; margin-bottom:8px; }
+        .tech-name { font-size:13px; font-weight:700; margin-bottom:3px; }
+        .tech-role { font-size:11px; color:#8b949e; }
+
+        /* Command list */
+        .command-list { max-width:780px; width:100%; }
+        .command-item {
+            display:flex; align-items:center; gap:16px; padding:14px 20px;
+            background:#161b22; border:1px solid #30363d; border-radius:8px;
+            margin-bottom:10px; opacity:0; transform:translateX(-20px);
+        }
+        .slide.active .command-item { opacity:1; transform:translateX(0); }
+        .command-item:nth-child(1){transition:all .3s ease .15s} .command-item:nth-child(2){transition:all .3s ease .3s}
+        .command-item:nth-child(3){transition:all .3s ease .45s} .command-item:nth-child(4){transition:all .3s ease .6s}
+        .command-item:nth-child(5){transition:all .3s ease .75s}
+        .command-key {
+            font-family:'Fira Code',monospace; font-size:11px; background:#21262d;
+            border:1px solid #30363d; padding:5px 10px; border-radius:5px;
+            color:#58a6ff; min-width:200px; white-space:nowrap;
+        }
+        .command-desc { font-size:13px; color:#c9d1d9; }
+
+        /* Future grid */
+        .future-grid { display:grid; grid-template-columns:repeat(2,1fr); gap:16px; max-width:880px; width:100%; }
+        .future-card {
+            background:linear-gradient(135deg,#161b22,#1c2333); border:1px solid #30363d;
+            border-radius:10px; padding:20px; opacity:0; transform:translateY(15px);
+        }
+        .slide.active .future-card { opacity:1; transform:translateY(0); }
+        .future-card:nth-child(1){transition:all .3s ease .15s; border-left:3px solid #58a6ff}
+        .future-card:nth-child(2){transition:all .3s ease .3s; border-left:3px solid #a371f7}
+        .future-card:nth-child(3){transition:all .3s ease .45s; border-left:3px solid #f778ba}
+        .future-card:nth-child(4){transition:all .3s ease .6s; border-left:3px solid #3fb950}
+        .future-card:nth-child(5){transition:all .3s ease .75s; border-left:3px solid #ffa657}
+        .future-card:nth-child(6){transition:all .3s ease .9s; border-left:3px solid #79c0ff}
+        .future-title { font-size:15px; font-weight:700; margin-bottom:5px; display:flex; align-items:center; gap:6px; }
+        .future-desc { font-size:12px; color:#8b949e; line-height:1.5; }
+
+        /* End slide */
+        .end-title {
+            font-size:52px; font-weight:900;
+            background:linear-gradient(135deg,#58a6ff,#a371f7,#f778ba);
+            -webkit-background-clip:text; -webkit-text-fill-color:transparent; margin-bottom:12px;
+        }
+        .end-sub { font-size:18px; color:#8b949e; margin-bottom:30px; }
+        .end-links { display:flex; gap:16px; }
+        .end-link {
+            background:#21262d; border:1px solid #30363d; border-radius:8px;
+            padding:12px 22px; font-size:13px; font-weight:600; color:#c9d1d9;
+        }
+
+        /* ===== VS CODE MOCKUP STYLES ===== */
+        .vscode-mockup {
+            width: 520px; background: #1e1e1e; border-radius: 10px;
+            border: 1px solid #30363d; overflow: hidden;
+            box-shadow: 0 8px 32px rgba(0,0,0,0.4);
+            opacity: 0; transform: translateY(20px);
+            font-size: 12px;
+        }
+        .slide.active .vscode-mockup { opacity:1; transform:translateY(0); transition: all 0.5s ease 0.3s; }
+        .vscode-titlebar {
+            background: #323233; padding: 6px 12px; display: flex; align-items: center; gap: 6px;
+        }
+        .vscode-dot { width:10px; height:10px; border-radius:50%; }
+        .vscode-dot.r { background:#ff5f57; } .vscode-dot.y { background:#ffbd2e; } .vscode-dot.g { background:#28c840; }
+        .vscode-title { color:#8b8b8b; font-size:11px; margin-left:8px; }
+        .vscode-sidebar-header {
+            background: linear-gradient(135deg, #252526, rgba(0,122,204,0.08));
+            border-bottom: 2px solid rgba(0,122,204,0.3);
+            padding: 8px 12px; display: flex; justify-content: space-between; align-items: center;
+        }
+        .vscode-sidebar-title { font-size:12px; font-weight:700; color:#cccccc; }
+        .vscode-stats { display:flex; gap:12px; }
+        .vscode-stat { font-size:11px; color:#8b8b8b; }
+        .vscode-chat-area { padding:12px; max-height:280px; overflow:hidden; }
+        .vscode-msg {
+            padding:10px 14px; border-radius:10px; margin-bottom:8px;
+            font-size:12px; line-height:1.5;
+        }
+        .vscode-msg.user {
+            background: linear-gradient(135deg, rgba(0,122,204,0.15), rgba(0,122,204,0.08));
+            border: 1px solid rgba(0,122,204,0.3); margin-left:40px;
+        }
+        .vscode-msg.assistant {
+            background: linear-gradient(135deg, rgba(76,175,80,0.1), rgba(76,175,80,0.04));
+            border: 1px solid rgba(76,175,80,0.2); margin-right:20px;
+        }
+        .vscode-msg strong { color:#58a6ff; }
+        .vscode-msg code {
+            background:rgba(0,122,204,0.15); border:1px solid rgba(0,122,204,0.2);
+            border-radius:3px; padding:0 4px; font-family:'Fira Code',monospace; font-size:11px; color:#58a6ff;
+        }
+        .vscode-code-block {
+            background:rgba(0,0,0,0.35); border:1px solid rgba(255,255,255,0.1);
+            border-left:3px solid #007acc; border-radius:6px; padding:0; margin:6px 0;
+        }
+        .vscode-code-header {
+            display:flex; justify-content:space-between; padding:4px 8px;
+            background:rgba(255,255,255,0.05); border-bottom:1px solid rgba(255,255,255,0.08);
+            border-radius:6px 6px 0 0; font-size:9px;
+        }
+        .vscode-code-lang { color:#58a6ff; font-weight:700; text-transform:uppercase; letter-spacing:.5px; }
+        .vscode-code-copy { color:#8b8b8b; }
+        .vscode-code-body {
+            padding:8px 10px; font-family:'Fira Code',monospace; font-size:11px; line-height:1.5;
+        }
+        .vscode-code-body .kw { color:#c586c0; font-weight:600; }
+        .vscode-code-body .ty { color:#4ec9b0; }
+        .vscode-code-body .an { color:#dcdcaa; }
+        .vscode-code-body .str { color:#ce9178; }
+        .vscode-code-body .cm { color:#6a9955; font-style:italic; }
+        .vscode-code-body .num { color:#b5cea8; }
+        .vscode-quick-actions {
+            display:flex; flex-wrap:wrap; gap:4px; padding:8px 12px;
+            border-top:1px solid rgba(255,255,255,0.06);
+        }
+        .vscode-qa-label { font-size:9px; color:#8b8b8b; font-weight:700; text-transform:uppercase; letter-spacing:.5px; margin-right:4px; }
+        .vscode-qa-btn {
+            font-size:10px; padding:3px 8px;
+            background:linear-gradient(135deg,rgba(0,122,204,0.15),rgba(0,122,204,0.08));
+            color:#58a6ff; border:1px solid rgba(0,122,204,0.25);
+            border-radius:10px; font-weight:500;
+        }
+        .vscode-input-area {
+            padding:8px 12px; border-top:1px solid #30363d; display:flex; gap:6px; align-items:center;
+        }
+        .vscode-input {
+            flex:1; background:#3c3c3c; border:1px solid #4a4a4a; border-radius:6px;
+            padding:6px 10px; color:#cccccc; font-size:12px;
+        }
+        .vscode-send { background:#007acc; border:none; border-radius:6px; padding:6px 12px; color:white; font-size:11px; font-weight:600; }
+
+        /* Feature Browser Mockup */
+        .vscode-browser-header {
+            background:#252526; padding:12px 16px; display:flex; justify-content:space-between; align-items:center;
+            border-bottom:1px solid #30363d;
+        }
+        .vscode-browser-title { font-size:14px; font-weight:700; color:#cccccc; }
+        .vscode-search {
+            width:100%; background:#3c3c3c; border:1px solid #4a4a4a; border-radius:6px;
+            padding:6px 10px; color:#cccccc; font-size:11px; margin:8px 12px;
+        }
+        .vscode-feature-card {
+            background:#2d2d2d; border:1px solid #3c3c3c; border-radius:8px;
+            padding:12px; margin:6px 12px;
+        }
+        .vscode-fc-header { display:flex; justify-content:space-between; align-items:center; margin-bottom:6px; }
+        .vscode-fc-name { font-size:13px; font-weight:700; color:#cccccc; display:flex; align-items:center; gap:6px; }
+        .vscode-fc-lang { font-size:10px; color:#58a6ff; background:rgba(0,122,204,0.15); padding:2px 6px; border-radius:4px; }
+        .vscode-fc-desc { font-size:11px; color:#8b8b8b; margin-bottom:8px; }
+        .vscode-fc-meta { font-size:10px; color:#6a737d; margin-bottom:8px; }
+        .vscode-fc-actions { display:flex; gap:4px; flex-wrap:wrap; padding-top:8px; border-top:1px solid #3c3c3c; }
+        .vscode-fc-btn {
+            font-size:10px; padding:4px 8px; border:1px solid rgba(255,255,255,0.12);
+            border-radius:5px; background:rgba(255,255,255,0.06); color:#cccccc; font-weight:600;
+        }
+        .vscode-fc-btn.green { background:linear-gradient(135deg,rgba(76,175,80,0.2),rgba(76,175,80,0.1)); color:#81c784; border-color:rgba(76,175,80,0.3); }
+
+        /* Stats Mockup */
+        .vscode-stats-msg {
+            padding:12px; line-height:1.7; font-size:12px;
+        }
+        .vscode-stats-msg strong { color:#58a6ff; }
+
+        /* Side-by-side layout */
+        .side-by-side {
+            display: flex; gap: 30px; align-items: flex-start; max-width: 1100px; width: 100%;
+        }
+        .side-desc { flex: 1; }
+        .side-desc h3 { font-size:20px; font-weight:700; margin-bottom:12px; }
+        .side-desc p { font-size:14px; color:#8b949e; line-height:1.6; margin-bottom:12px; }
+        .side-desc .highlight-list { list-style:none; }
+        .side-desc .highlight-list li {
+            padding:6px 0; font-size:13px; color:#c9d1d9; display:flex; align-items:center; gap:8px;
+        }
+    </style>
+</head>
+<body>
+
+<div class="progress-bar" id="progress"></div>
+<div class="slide-counter" id="counter">1 / 12</div>
+<div class="controls-hint"><kbd>←</kbd> <kbd>→</kbd> <kbd>Space</kbd></div>
+<button class="pause-btn" id="pauseBtn" onclick="toggleAutoplay()">
+    <div class="dot"></div> <span id="pauseLabel">Playing</span>
+</button>
+
+<div class="slide-container">
+
+    <!-- SLIDE 1: Title -->
+    <div class="slide title-slide active" data-duration="6">
+        <div class="title-logo">🐱</div>
+        <div class="title-name">OpenCat</div>
+        <div class="title-tagline">AI-Powered Code Assistant with Codebase Knowledge Base</div>
+        <div class="title-version">v0.2.0 &bull; VS Code Extension &bull; GitHub Copilot Integration</div>
+    </div>
+
+    <!-- SLIDE 2: Problem -->
+    <div class="slide" data-duration="8">
+        <div class="section-header">The Problem</div>
+        <div class="slide-title">AI assistants don't know your codebase</div>
+        <div class="slide-subtitle">OpenCat scans your workspace, builds a knowledge base of features, components and data flows, and sends rich context to Copilot.</div>
+        <div class="stats-bar">
+            <div class="stat-box"><div class="stat-number">5</div><div class="stat-label">Languages</div></div>
+            <div class="stat-box"><div class="stat-number">12</div><div class="stat-label">Component Types</div></div>
+            <div class="stat-box"><div class="stat-number">5</div><div class="stat-label">Dependency Types</div></div>
+            <div class="stat-box"><div class="stat-number">11</div><div class="stat-label">DB Tables</div></div>
+        </div>
+    </div>
+
+    <!-- SLIDE 3: Core Features -->
+    <div class="slide" data-duration="10">
+        <div class="section-header">Core Features</div>
+        <div class="slide-title">What OpenCat Does</div>
+        <div class="feature-grid">
+            <div class="feature-card">
+                <div class="feature-icon">🔍</div>
+                <div class="feature-name">Workspace Scanning</div>
+                <div class="feature-desc">Parses Java, TS, JS files. Builds ASTs to identify controllers, services, repositories.</div>
+            </div>
+            <div class="feature-card">
+                <div class="feature-icon">🧩</div>
+                <div class="feature-name">Feature Discovery</div>
+                <div class="feature-desc">Traces dependencies from entry points through services to repositories. Groups into features.</div>
+            </div>
+            <div class="feature-card">
+                <div class="feature-icon">🔀</div>
+                <div class="feature-name">Data Flow Tracking</div>
+                <div class="feature-desc">Maps calls, imports, injections, events between components. Full request flow.</div>
+            </div>
+            <div class="feature-card">
+                <div class="feature-icon">🤖</div>
+                <div class="feature-name">Copilot Integration</div>
+                <div class="feature-desc">Sends rich context to GitHub Copilot. Automatic model fallback and retry.</div>
+            </div>
+            <div class="feature-card">
+                <div class="feature-icon">📚</div>
+                <div class="feature-name">Feature Browser</div>
+                <div class="feature-desc">Visual browser with search, filter, grouping. One-click: Explain, Fix, Recreate, Ask.</div>
+            </div>
+            <div class="feature-card">
+                <div class="feature-icon">💬</div>
+                <div class="feature-name">Context-Aware Chat</div>
+                <div class="feature-desc">Conversation history, syntax highlighting, quick actions, inline copy.</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- SLIDE 4: Chat Screenshot -->
+    <div class="slide" data-duration="10">
+        <div class="section-header">In Action</div>
+        <div class="slide-title">AI Chat with Context</div>
+        <div class="side-by-side">
+            <div class="side-desc">
+                <h3>💬 Intelligent Conversations</h3>
+                <ul class="highlight-list">
+                    <li>🟢 User messages with blue tint</li>
+                    <li>🟢 Assistant responses with green tint</li>
+                    <li>🟢 Syntax-highlighted code blocks</li>
+                    <li>🟢 Language label + copy button on code</li>
+                    <li>🟢 Quick follow-up action buttons</li>
+                    <li>🟢 Conversation history for follow-ups</li>
+                    <li>🟢 Header shows features / components / files</li>
+                </ul>
+            </div>
+            <div class="vscode-mockup">
+                <div class="vscode-titlebar">
+                    <div class="vscode-dot r"></div><div class="vscode-dot y"></div><div class="vscode-dot g"></div>
+                    <div class="vscode-title">OpenCat — VS Code</div>
+                </div>
+                <div class="vscode-sidebar-header">
+                    <div class="vscode-sidebar-title">🐱 OpenCat</div>
+                    <div class="vscode-stats">
+                        <span class="vscode-stat">🧩 8</span>
+                        <span class="vscode-stat">🔧 24</span>
+                        <span class="vscode-stat">📁 35</span>
+                    </div>
+                </div>
+                <div class="vscode-chat-area">
+                    <div class="vscode-msg user">How does the Order feature work?</div>
+                    <div class="vscode-msg assistant">
+                        <strong>📁 Feature Context: Order Management</strong><br>
+                        The order feature follows a <strong>Controller → Service → Repository</strong> pattern:<br><br>
+                        <code>OrderController</code> handles HTTP requests and delegates to <code>OrderService</code>...
+                        <div class="vscode-code-block">
+                            <div class="vscode-code-header">
+                                <span class="vscode-code-lang">java</span>
+                                <span class="vscode-code-copy">Copy</span>
+                            </div>
+                            <div class="vscode-code-body">
+                                <span class="an">@RestController</span><br>
+                                <span class="kw">public class</span> <span class="ty">OrderController</span> {<br>
+                                &nbsp;&nbsp;<span class="an">@Autowired</span><br>
+                                &nbsp;&nbsp;<span class="kw">private</span> <span class="ty">OrderService</span> service;<br>
+                                }
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div class="vscode-quick-actions">
+                    <span class="vscode-qa-label">Actions:</span>
+                    <span class="vscode-qa-btn">🧠 Explain</span>
+                    <span class="vscode-qa-btn">🐛 Find Bugs</span>
+                    <span class="vscode-qa-btn">♻️ Refactor</span>
+                    <span class="vscode-qa-btn">🧪 Write Tests</span>
+                    <span class="vscode-qa-btn">📋 Recreate</span>
+                </div>
+                <div class="vscode-input-area">
+                    <div class="vscode-input">Ask about your codebase...</div>
+                    <div class="vscode-send">Send</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- SLIDE 5: Feature Browser Screenshot -->
+    <div class="slide" data-duration="10">
+        <div class="section-header">In Action</div>
+        <div class="slide-title">Feature Browser</div>
+        <div class="side-by-side">
+            <div class="vscode-mockup" style="width:540px;">
+                <div class="vscode-titlebar">
+                    <div class="vscode-dot r"></div><div class="vscode-dot y"></div><div class="vscode-dot g"></div>
+                    <div class="vscode-title">Feature Browser — OpenCat</div>
+                </div>
+                <div class="vscode-browser-header">
+                    <div class="vscode-browser-title">📚 Browse Features</div>
+                    <span style="color:#8b8b8b;font-size:11px;">✕</span>
+                </div>
+                <div class="vscode-search" style="width:auto;">🔍 Search patterns by name, tag, language...</div>
+                <div style="padding:4px 12px;display:flex;gap:6px;">
+                    <span style="font-size:10px;color:#8b8b8b;background:#3c3c3c;padding:3px 8px;border-radius:4px;">All Features ▾</span>
+                    <span style="font-size:10px;color:#8b8b8b;background:#3c3c3c;padding:3px 8px;border-radius:4px;">All Languages ▾</span>
+                    <span style="font-size:10px;color:#8b8b8b;background:#3c3c3c;padding:3px 8px;border-radius:4px;">Most Recent ▾</span>
+                </div>
+                <div style="padding:6px 12px;font-size:10px;color:#8b8b8b;border-bottom:1px solid #30363d;">📊 Showing 8 of 8 features</div>
+                <div class="vscode-feature-card">
+                    <div class="vscode-fc-header">
+                        <div class="vscode-fc-name">⚙️ Order Management</div>
+                        <div class="vscode-fc-lang">java</div>
+                    </div>
+                    <div class="vscode-fc-desc">Handles order creation, payment processing, and fulfillment</div>
+                    <div class="vscode-fc-meta">📦 4 components &bull; 🔧 Spring Boot</div>
+                    <div class="vscode-fc-actions">
+                        <span class="vscode-fc-btn">👁️ View</span>
+                        <span class="vscode-fc-btn">🧠 Explain</span>
+                        <span class="vscode-fc-btn">🔧 Fix</span>
+                        <span class="vscode-fc-btn">📋 Recreate</span>
+                        <span class="vscode-fc-btn green">💬 Ask</span>
+                    </div>
+                </div>
+                <div class="vscode-feature-card">
+                    <div class="vscode-fc-header">
+                        <div class="vscode-fc-name">⚛️ User Dashboard</div>
+                        <div class="vscode-fc-lang">typescript</div>
+                    </div>
+                    <div class="vscode-fc-desc">React dashboard with AG Grid data table and charts</div>
+                    <div class="vscode-fc-meta">📦 6 components &bull; 🔧 React</div>
+                    <div class="vscode-fc-actions">
+                        <span class="vscode-fc-btn">👁️ View</span>
+                        <span class="vscode-fc-btn">🧠 Explain</span>
+                        <span class="vscode-fc-btn">🔧 Fix</span>
+                        <span class="vscode-fc-btn">📋 Recreate</span>
+                        <span class="vscode-fc-btn green">💬 Ask</span>
+                    </div>
+                </div>
+            </div>
+            <div class="side-desc">
+                <h3>📚 Visual Feature Browser</h3>
+                <ul class="highlight-list">
+                    <li>🟢 Search by name, tag, or language</li>
+                    <li>🟢 Filter by language (Java, TS, JS, Python, Go)</li>
+                    <li>🟢 Sort by name, language, or recency</li>
+                    <li>🟢 Group by feature toggle</li>
+                    <li>🟢 Shows component count and framework</li>
+                    <li>🟢 5 action buttons per feature card</li>
+                    <li>🟢 Color-coded hover states per action</li>
+                </ul>
+            </div>
+        </div>
+    </div>
+
+    <!-- SLIDE 6: KB Stats Screenshot -->
+    <div class="slide" data-duration="9">
+        <div class="section-header">In Action</div>
+        <div class="slide-title">Knowledge Base Stats</div>
+        <div class="side-by-side">
+            <div class="side-desc">
+                <h3>📊 Full Visibility</h3>
+                <ul class="highlight-list">
+                    <li>🟢 Features, components, data flows counted</li>
+                    <li>🟢 Breakdown by language</li>
+                    <li>🟢 Breakdown by component type</li>
+                    <li>🟢 Frameworks auto-detected</li>
+                    <li>🟢 Top tags ranked</li>
+                    <li>🟢 Available in chat + command palette</li>
+                </ul>
+            </div>
+            <div class="vscode-mockup" style="width:480px;">
+                <div class="vscode-titlebar">
+                    <div class="vscode-dot r"></div><div class="vscode-dot y"></div><div class="vscode-dot g"></div>
+                    <div class="vscode-title">KB Stats — OpenCat</div>
+                </div>
+                <div class="vscode-chat-area">
+                    <div class="vscode-msg assistant">
+                        <div class="vscode-stats-msg">
+                            <strong>📊 Knowledge Base Statistics</strong><br><br>
+                            <strong>🧩 Features:</strong> 8<br>
+                            <strong>🔧 Components:</strong> 24<br>
+                            <strong>🔀 Data Flows:</strong> 18<br>
+                            <strong>📁 Indexed Files:</strong> 35<br>
+                            <strong>📝 Indexed Terms:</strong> 2,646<br><br>
+                            <strong>💻 Features by Language:</strong><br>
+                            &nbsp;&nbsp;• java: 5<br>
+                            &nbsp;&nbsp;• typescript: 2<br>
+                            &nbsp;&nbsp;• javascript: 1<br><br>
+                            <strong>🏗️ Components by Type:</strong><br>
+                            &nbsp;&nbsp;• service: 8<br>
+                            &nbsp;&nbsp;• controller: 5<br>
+                            &nbsp;&nbsp;• repository: 4<br>
+                            &nbsp;&nbsp;• model: 4<br>
+                            &nbsp;&nbsp;• component: 3<br><br>
+                            <strong>🛠️ Frameworks Detected:</strong><br>
+                            &nbsp;&nbsp;• Spring Boot: 5 features<br>
+                            &nbsp;&nbsp;• React: 2 features
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- SLIDE 7: Indexing Pipeline -->
+    <div class="slide" data-duration="10">
+        <div class="section-header">How It Works</div>
+        <div class="slide-title">Indexing Pipeline</div>
+        <div class="slide-subtitle">From source files to intelligent knowledge base</div>
+        <div class="flow-container">
+            <div class="flow-step"><div class="flow-icon">📁</div><div class="flow-label">Source Files</div><div class="flow-detail">.java .ts .tsx .js .jsx</div></div>
+            <div class="flow-arrow">→</div>
+            <div class="flow-step"><div class="flow-icon">🌳</div><div class="flow-label">AST Parsing</div><div class="flow-detail">Babel + java-parser</div></div>
+            <div class="flow-arrow">→</div>
+            <div class="flow-step"><div class="flow-icon">🔧</div><div class="flow-label">Component Analysis</div><div class="flow-detail">12 component types</div></div>
+            <div class="flow-arrow">→</div>
+            <div class="flow-step"><div class="flow-icon">🔗</div><div class="flow-label">Dependency Graph</div><div class="flow-detail">Forward + reverse</div></div>
+            <div class="flow-arrow">→</div>
+            <div class="flow-step"><div class="flow-icon">🧩</div><div class="flow-label">Feature Grouping</div><div class="flow-detail">Entry point tracing</div></div>
+        </div>
+        <br>
+        <div class="flow-container">
+            <div class="flow-step" style="transition-delay:1.3s"><div class="flow-icon">💾</div><div class="flow-label">SQLite Storage</div><div class="flow-detail">sql.js in-memory</div></div>
+            <div class="flow-arrow" style="transition-delay:1.5s">→</div>
+            <div class="flow-step" style="transition-delay:1.7s"><div class="flow-icon">🔎</div><div class="flow-label">BM25 Search</div><div class="flow-detail">Full-text index</div></div>
+            <div class="flow-arrow" style="transition-delay:1.9s">→</div>
+            <div class="flow-step" style="transition-delay:2.1s"><div class="flow-icon">🤖</div><div class="flow-label">AI Context</div><div class="flow-detail">Rich Copilot prompts</div></div>
+        </div>
+    </div>
+
+    <!-- SLIDE 8: Architecture -->
+    <div class="slide" data-duration="9">
+        <div class="section-header">Architecture</div>
+        <div class="slide-title">Component Detection & Dependencies</div>
+        <div class="two-col">
+            <div>
+                <div class="col-title">🏗️ Component Types</div>
+                <ul class="col-list">
+                    <li><span class="li-icon">🎮</span> <strong>Controller</strong> — HTTP/gRPC entry points</li>
+                    <li><span class="li-icon">⚙️</span> <strong>Service</strong> — Business logic</li>
+                    <li><span class="li-icon">🗄️</span> <strong>Repository</strong> — Data access</li>
+                    <li><span class="li-icon">📦</span> <strong>Model</strong> — Domain entities</li>
+                    <li><span class="li-icon">⚛️</span> <strong>Component / Hook</strong> — UI layer</li>
+                    <li><span class="li-icon">🔌</span> <strong>Middleware / Config</strong> — Cross-cutting</li>
+                </ul>
+            </div>
+            <div>
+                <div class="col-title">🔗 Dependency Tracking</div>
+                <ul class="col-list">
+                    <li><span class="li-icon">📥</span> <strong>import</strong> — Import/require statements</li>
+                    <li><span class="li-icon">💉</span> <strong>inject</strong> — @Autowired injection</li>
+                    <li><span class="li-icon">📞</span> <strong>call</strong> — Method/function calls</li>
+                    <li><span class="li-icon">🧬</span> <strong>extend</strong> — Class inheritance</li>
+                    <li><span class="li-icon">📋</span> <strong>implement</strong> — Interface impl</li>
+                    <li><span class="li-icon">📡</span> <strong>emit / subscribe</strong> — Events</li>
+                </ul>
+            </div>
+        </div>
+    </div>
+
+    <!-- SLIDE 9: Commands -->
+    <div class="slide" data-duration="9">
+        <div class="section-header">Usage</div>
+        <div class="slide-title">Commands</div>
+        <div class="slide-subtitle">Available via Command Palette (Ctrl+Shift+P)</div>
+        <div class="command-list">
+            <div class="command-item"><div class="command-key">OpenCat: Index Workspace</div><div class="command-desc">Scan files, build AST, discover features and data flows</div></div>
+            <div class="command-item"><div class="command-key">OpenCat: Open Chat</div><div class="command-desc">Open AI chat sidebar with knowledge base context</div></div>
+            <div class="command-item"><div class="command-key">OpenCat: Show KB Stats</div><div class="command-desc">Features, components, data flows, languages, frameworks</div></div>
+            <div class="command-item"><div class="command-key">OpenCat: List Saved Patterns</div><div class="command-desc">Browse features — view components, data flow, details</div></div>
+            <div class="command-item"><div class="command-key">OpenCat: Reset Knowledge Base</div><div class="command-desc">Clear all indexed data for a fresh start</div></div>
+        </div>
+    </div>
+
+    <!-- SLIDE 10: Tech Stack -->
+    <div class="slide" data-duration="9">
+        <div class="section-header">Technology</div>
+        <div class="slide-title">Tech Stack</div>
+        <div class="tech-grid">
+            <div class="tech-card"><div class="tech-icon">🟦</div><div class="tech-name">TypeScript</div><div class="tech-role">Core language</div></div>
+            <div class="tech-card"><div class="tech-icon">💎</div><div class="tech-name">VS Code API</div><div class="tech-role">Extension host, webview, LM</div></div>
+            <div class="tech-card"><div class="tech-icon">🗃️</div><div class="tech-name">SQL.js (SQLite)</div><div class="tech-role">In-memory knowledge base</div></div>
+            <div class="tech-card"><div class="tech-icon">🌳</div><div class="tech-name">Babel Parser</div><div class="tech-role">TS/JS AST parsing</div></div>
+            <div class="tech-card"><div class="tech-icon">☕</div><div class="tech-name">java-parser</div><div class="tech-role">Java AST parsing</div></div>
+            <div class="tech-card"><div class="tech-icon">🔎</div><div class="tech-name">BM25 Algorithm</div><div class="tech-role">Full-text search ranking</div></div>
+            <div class="tech-card"><div class="tech-icon">🤖</div><div class="tech-name">vscode.lm API</div><div class="tech-role">Copilot model integration</div></div>
+            <div class="tech-card"><div class="tech-icon">⚡</div><div class="tech-name">esbuild</div><div class="tech-role">Fast bundling</div></div>
+        </div>
+    </div>
+
+    <!-- SLIDE 11: Future -->
+    <div class="slide" data-duration="10">
+        <div class="section-header">Roadmap</div>
+        <div class="slide-title">Future Enhancements</div>
+        <div class="future-grid">
+            <div class="future-card"><div class="future-title">🌐 Multi-Language Expansion</div><div class="future-desc">Python, Go, Rust, C# parsing. Protocol Buffer cross-language tracking.</div></div>
+            <div class="future-card"><div class="future-title">🧪 Auto-Generated Tests</div><div class="future-desc">Generate unit/integration tests following existing project patterns.</div></div>
+            <div class="future-card"><div class="future-title">📊 Visual Architecture Maps</div><div class="future-desc">Interactive dependency graphs and data flow diagrams as SVG.</div></div>
+            <div class="future-card"><div class="future-title">🔄 Real-Time Indexing</div><div class="future-desc">File watcher for automatic re-indexing on save. Always up-to-date KB.</div></div>
+            <div class="future-card"><div class="future-title">🤝 Team Knowledge Sharing</div><div class="future-desc">Export/import KBs across teams. Portable architectural patterns.</div></div>
+            <div class="future-card"><div class="future-title">🧠 Copilot Agent Mode</div><div class="future-desc">Direct Copilot agent with feature-aware instructions and auto-plans.</div></div>
+        </div>
+    </div>
+
+    <!-- SLIDE 12: End -->
+    <div class="slide title-slide" data-duration="6">
+        <div class="title-logo">🐱</div>
+        <div class="end-title">OpenCat</div>
+        <div class="end-sub">Your codebase, understood by AI.</div>
+        <div class="end-links">
+            <div class="end-link">🧩 v0.2.0 &bull; Story 2.2</div>
+            <div class="end-link">🔧 Java &bull; TypeScript &bull; JavaScript</div>
+            <div class="end-link">🤖 GitHub Copilot Powered</div>
+        </div>
+    </div>
+
+</div>
+
+<script>
+    const slides = document.querySelectorAll('.slide');
+    const progress = document.getElementById('progress');
+    const counter = document.getElementById('counter');
+    const pauseBtn = document.getElementById('pauseBtn');
+    const pauseLabel = document.getElementById('pauseLabel');
+
+    let current = 0;
+    let autoplay = true;
+    let timer = null;
+    let elapsed = 0;
+    let tickInterval = null;
+
+    function showSlide(idx) {
+        slides.forEach((s, i) => s.classList.toggle('active', i === idx));
+        counter.textContent = (idx + 1) + ' / ' + slides.length;
+        current = idx;
+        elapsed = 0;
+        startTimer();
+    }
+
+    function nextSlide() {
+        if (current < slides.length - 1) showSlide(current + 1);
+        else showSlide(0);
+    }
+
+    function prevSlide() {
+        if (current > 0) showSlide(current - 1);
+    }
+
+    function startTimer() {
+        clearTimeout(timer);
+        clearInterval(tickInterval);
+        const duration = parseInt(slides[current].dataset.duration || '8') * 1000;
+
+        tickInterval = setInterval(() => {
+            elapsed += 50;
+            const totalDuration = parseInt(slides[current].dataset.duration || '8') * 1000;
+            const totalProgress = ((current / slides.length) + (elapsed / totalDuration / slides.length)) * 100;
+            progress.style.width = Math.min(totalProgress, 100) + '%';
+        }, 50);
+
+        if (autoplay) {
+            timer = setTimeout(nextSlide, duration);
+        }
+    }
+
+    function toggleAutoplay() {
+        autoplay = !autoplay;
+        pauseBtn.classList.toggle('paused', !autoplay);
+        pauseLabel.textContent = autoplay ? 'Playing' : 'Paused';
+        if (autoplay) startTimer();
+        else { clearTimeout(timer); clearInterval(tickInterval); }
+    }
+
+    document.addEventListener('keydown', (e) => {
+        if (e.key === 'ArrowRight' || e.key === ' ') { e.preventDefault(); nextSlide(); }
+        if (e.key === 'ArrowLeft') { e.preventDefault(); prevSlide(); }
+        if (e.key === 'p' || e.key === 'P') { toggleAutoplay(); }
+    });
+
+    showSlide(0);
+</script>
+
+</body>
+</html>
