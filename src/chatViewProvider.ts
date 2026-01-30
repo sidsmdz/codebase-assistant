@@ -307,7 +307,13 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
             'explain_more': 'Can you explain this in more detail?',
             'show_related': 'What other components or features are related to this?',
             'how_to_use': 'How do I use this in my code?',
-            'best_practices': 'What are the best practices for this pattern?'
+            'best_practices': 'What are the best practices for this pattern?',
+            'find_bugs': 'Analyze this code for potential bugs, edge cases, and issues. Suggest fixes.',
+            'refactor': 'How can I refactor this code to be cleaner and more maintainable?',
+            'write_tests': 'Write unit tests for this code. Include edge cases.',
+            'recreate_steps': 'Give me step-by-step instructions to recreate this from scratch, suitable for a Copilot agent or developer.',
+            'add_feature': 'What features or improvements could be added to this? Suggest enhancements with code.',
+            'document_it': 'Generate comprehensive documentation for this code including API docs, usage examples, and architecture notes.'
         };
 
         const message = actionMessages[action];
@@ -648,7 +654,7 @@ Please answer the user's question using the feature context above. Reference spe
                     content: response,
                     showActions: true,
                     featureContext: feature.name,
-                    quickActions: ['show_example', 'explain_more', 'show_related']
+                    quickActions: ['explain_more', 'find_bugs', 'refactor', 'write_tests', 'recreate_steps', 'add_feature', 'document_it']
                 });
 
                 // Show save button if response contains code
@@ -776,8 +782,8 @@ Please answer the user's question using the feature context above. Reference spe
         /* Header with stats */
         #header {
             padding: 12px 16px;
-            background-color: var(--vscode-sideBarSectionHeader-background);
-            border-bottom: 1px solid var(--vscode-panel-border);
+            background: linear-gradient(135deg, var(--vscode-sideBarSectionHeader-background), rgba(0, 122, 204, 0.08));
+            border-bottom: 2px solid rgba(0, 122, 204, 0.3);
             display: flex;
             justify-content: space-between;
             align-items: center;
@@ -930,39 +936,48 @@ Please answer the user's question using the feature context above. Reference spe
         }
 
         .message.user {
-            background-color: var(--vscode-input-background);
+            background: linear-gradient(135deg, rgba(0, 122, 204, 0.15), rgba(0, 122, 204, 0.08));
             align-self: flex-end;
-            border: 1px solid var(--vscode-input-border);
+            border: 1px solid rgba(0, 122, 204, 0.3);
             border-bottom-right-radius: 4px;
+            box-shadow: 0 2px 8px rgba(0, 122, 204, 0.1);
         }
 
         .message.assistant {
-            background-color: var(--vscode-editor-inactiveSelectionBackground);
+            background: linear-gradient(135deg, rgba(76, 175, 80, 0.1), rgba(76, 175, 80, 0.04));
             align-self: flex-start;
+            border: 1px solid rgba(76, 175, 80, 0.2);
             border-bottom-left-radius: 4px;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+        }
+
+        .message.assistant strong {
+            color: var(--vscode-textLink-foreground);
         }
 
         .message-content {
             white-space: pre-wrap;
-            line-height: 1.6;
+            line-height: 1.7;
+            font-size: 13px;
         }
 
         .message-actions {
             display: flex;
             gap: 8px;
-            margin-top: 8px;
-            padding-top: 8px;
-            border-top: 1px solid var(--vscode-panel-border);
+            margin-top: 10px;
+            padding-top: 10px;
+            border-top: 1px solid rgba(255, 255, 255, 0.08);
         }
 
         .message-action-btn {
-            padding: 4px 8px;
+            padding: 5px 10px;
             font-size: 11px;
-            background-color: transparent;
+            background-color: rgba(255, 255, 255, 0.06);
             color: var(--vscode-textLink-foreground);
-            border: none;
-            border-radius: 4px;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 6px;
             cursor: pointer;
+            font-weight: 500;
             transition: all 0.2s;
         }
 
@@ -974,36 +989,44 @@ Please answer the user's question using the feature context above. Reference spe
         .quick-actions {
             display: flex;
             flex-wrap: wrap;
-            gap: 8px;
+            gap: 6px;
             margin-top: 12px;
             padding-top: 12px;
-            border-top: 1px solid var(--vscode-panel-border);
+            border-top: 1px solid rgba(255, 255, 255, 0.06);
             align-items: center;
         }
 
         .quick-actions-label {
-            font-size: 11px;
+            font-size: 10px;
             color: var(--vscode-descriptionForeground);
-            font-weight: 600;
+            font-weight: 700;
             margin-right: 4px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
         }
 
         .quick-action-btn {
-            padding: 6px 12px;
+            padding: 5px 10px;
             font-size: 11px;
-            background-color: var(--vscode-button-secondaryBackground);
-            color: var(--vscode-button-secondaryForeground);
-            border: 1px solid var(--vscode-button-border, transparent);
-            border-radius: 16px;
+            background: linear-gradient(135deg, rgba(0, 122, 204, 0.15), rgba(0, 122, 204, 0.08));
+            color: var(--vscode-textLink-foreground);
+            border: 1px solid rgba(0, 122, 204, 0.25);
+            border-radius: 14px;
             cursor: pointer;
-            transition: all 0.2s;
+            transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
             font-weight: 500;
         }
 
         .quick-action-btn:hover {
-            background-color: var(--vscode-button-background);
+            background: linear-gradient(135deg, var(--vscode-button-background), var(--vscode-button-hoverBackground));
             color: var(--vscode-button-foreground);
             transform: translateY(-1px);
+            box-shadow: 0 3px 8px rgba(0, 122, 204, 0.25);
+            border-color: var(--vscode-button-background);
+        }
+
+        .quick-action-btn:active {
+            transform: translateY(0);
         }
 
         /* Typing indicator */
@@ -1058,18 +1081,30 @@ Please answer the user's question using the feature context above. Reference spe
 
         /* Code blocks */
         pre {
-            background-color: var(--vscode-textCodeBlock-background);
-            border: 1px solid var(--vscode-panel-border);
-            border-radius: 4px;
-            padding: 12px;
+            background-color: rgba(0, 0, 0, 0.3);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 8px;
+            padding: 14px;
             overflow-x: auto;
-            margin: 8px 0;
+            margin: 10px 0;
             position: relative;
+            border-left: 3px solid var(--vscode-focusBorder);
         }
 
         code {
-            font-family: 'Courier New', Consolas, monospace;
+            font-family: 'Cascadia Code', 'Fira Code', 'Courier New', Consolas, monospace;
             font-size: 12px;
+            line-height: 1.5;
+        }
+
+        /* Inline code styling */
+        .message-content > code, .message-content p > code {
+            background: rgba(0, 122, 204, 0.15);
+            border: 1px solid rgba(0, 122, 204, 0.2);
+            border-radius: 4px;
+            padding: 1px 5px;
+            font-size: 12px;
+            color: var(--vscode-textLink-foreground);
         }
 
         .code-header {
@@ -1622,47 +1657,71 @@ Please answer the user's question using the feature context above. Reference spe
 
         .pattern-card-actions {
             display: flex;
-            gap: 10px;
+            gap: 6px;
             margin-top: 14px;
             padding-top: 14px;
             border-top: 1px solid var(--vscode-panel-border);
+            flex-wrap: wrap;
         }
 
         .card-action-btn {
-            flex: 1;
-            padding: 8px 14px;
-            border: 1px solid var(--vscode-button-border);
+            padding: 6px 10px;
+            border: 1px solid rgba(255, 255, 255, 0.12);
             border-radius: 6px;
-            background: var(--vscode-button-secondaryBackground);
-            color: var(--vscode-button-secondaryForeground);
-            font-size: 12px;
+            background: rgba(255, 255, 255, 0.06);
+            color: var(--vscode-foreground);
+            font-size: 11px;
             font-weight: 600;
             cursor: pointer;
             transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
             display: inline-flex;
             align-items: center;
             justify-content: center;
-            gap: 6px;
+            gap: 4px;
         }
 
         .card-action-btn:hover {
-            background: var(--vscode-button-secondaryHoverBackground);
             transform: translateY(-1px);
-            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
         }
 
         .card-action-btn:active {
             transform: translateY(0);
         }
 
+        .view-btn:hover {
+            background: rgba(0, 122, 204, 0.2);
+            border-color: rgba(0, 122, 204, 0.4);
+            color: var(--vscode-textLink-foreground);
+        }
+
+        .explain-btn:hover {
+            background: rgba(156, 39, 176, 0.2);
+            border-color: rgba(156, 39, 176, 0.4);
+            color: #ce93d8;
+        }
+
+        .fix-btn:hover {
+            background: rgba(255, 152, 0, 0.2);
+            border-color: rgba(255, 152, 0, 0.4);
+            color: #ffb74d;
+        }
+
+        .recreate-btn:hover {
+            background: rgba(0, 188, 212, 0.2);
+            border-color: rgba(0, 188, 212, 0.4);
+            color: #4dd0e1;
+        }
+
         .use-btn {
-            background: var(--vscode-button-background);
-            color: var(--vscode-button-foreground);
-            border-color: var(--vscode-button-background);
+            background: linear-gradient(135deg, rgba(76, 175, 80, 0.2), rgba(76, 175, 80, 0.1));
+            color: #81c784;
+            border-color: rgba(76, 175, 80, 0.3);
         }
 
         .use-btn:hover {
-            background: var(--vscode-button-hoverBackground);
+            background: linear-gradient(135deg, rgba(76, 175, 80, 0.35), rgba(76, 175, 80, 0.2));
+            box-shadow: 0 2px 8px rgba(76, 175, 80, 0.2);
         }
 
         .delete-btn {
@@ -1970,7 +2029,7 @@ Please answer the user's question using the feature context above. Reference spe
             });
         });
 
-        function addMessage(role, content, showActions = false) {
+        function addMessage(role, content, showActions = false, quickActionsList = null) {
             if (!hasMessages) {
                 messagesDiv.classList.remove('hidden');
                 welcomeScreen.classList.add('hidden');
@@ -2022,15 +2081,32 @@ Please answer the user's question using the feature context above. Reference spe
                     vscode.postMessage({ type: 'regenerate' });
                 });
 
-                // Quick follow-up actions
+                // Quick follow-up actions - dynamic based on context
                 const quickActionsDiv = document.createElement('div');
                 quickActionsDiv.className = 'quick-actions';
-                quickActionsDiv.innerHTML =
-                    '<span class="quick-actions-label">Continue:</span>' +
-                    '<button class="quick-action-btn" data-action="show_example">📝 Show Example</button>' +
-                    '<button class="quick-action-btn" data-action="explain_more">🔍 Explain More</button>' +
-                    '<button class="quick-action-btn" data-action="how_to_use">💡 How to Use</button>' +
-                    '<button class="quick-action-btn" data-action="best_practices">⭐ Best Practices</button>';
+
+                const actionLabels = {
+                    'yes_generate': '✅ Generate',
+                    'show_example': '📝 Example',
+                    'explain_more': '🧠 Explain',
+                    'show_related': '🔗 Related',
+                    'how_to_use': '💡 How to Use',
+                    'best_practices': '⭐ Best Practices',
+                    'find_bugs': '🐛 Find Bugs',
+                    'refactor': '♻️ Refactor',
+                    'write_tests': '🧪 Write Tests',
+                    'recreate_steps': '📋 Recreate Steps',
+                    'add_feature': '➕ Enhance',
+                    'document_it': '📄 Document'
+                };
+
+                const actions = quickActionsList || ['show_example', 'explain_more', 'how_to_use', 'best_practices'];
+                let buttonsHtml = '<span class="quick-actions-label">Actions:</span>';
+                actions.forEach(function(action) {
+                    const label = actionLabels[action] || action;
+                    buttonsHtml += '<button class="quick-action-btn" data-action="' + action + '">' + label + '</button>';
+                });
+                quickActionsDiv.innerHTML = buttonsHtml;
                 messageDiv.appendChild(quickActionsDiv);
 
                 // Attach event listeners to quick action buttons
@@ -2412,8 +2488,11 @@ Please answer the user's question using the feature context above. Reference spe
                 '</div>' +
                 '</div>' +
                 '<div class="pattern-card-actions">' +
-                '<button class="card-action-btn view-btn" data-action="view" data-id="' + feature.id + '">👁️ View Code</button>' +
-                '<button class="card-action-btn use-btn" data-action="use" data-id="' + feature.id + '">💬 Use as Context</button>' +
+                '<button class="card-action-btn view-btn" data-action="view" data-id="' + feature.id + '">👁️ View</button>' +
+                '<button class="card-action-btn explain-btn" data-action="explain" data-id="' + feature.id + '">🧠 Explain</button>' +
+                '<button class="card-action-btn fix-btn" data-action="fix" data-id="' + feature.id + '">🔧 Fix</button>' +
+                '<button class="card-action-btn recreate-btn" data-action="recreate" data-id="' + feature.id + '">📋 Recreate</button>' +
+                '<button class="card-action-btn use-btn" data-action="use" data-id="' + feature.id + '">💬 Ask</button>' +
                 '</div>' +
                 '</div>';
         }
@@ -2429,6 +2508,12 @@ Please answer the user's question using the feature context above. Reference spe
                         viewFeature(featureId);
                     } else if (action === 'use') {
                         useFeature(featureId);
+                    } else if (action === 'explain') {
+                        useFeatureWithAction(featureId, 'explain');
+                    } else if (action === 'fix') {
+                        useFeatureWithAction(featureId, 'fix');
+                    } else if (action === 'recreate') {
+                        useFeatureWithAction(featureId, 'recreate');
                     }
                 });
             });
@@ -2460,6 +2545,32 @@ Please answer the user's question using the feature context above. Reference spe
                     feature: feature
                 });
             }
+        }
+
+        function useFeatureWithAction(featureId, action) {
+            const feature = allFeatures.find(f => f.id === featureId);
+            if (!feature) return;
+
+            const actionQuestions = {
+                'explain': 'Explain this feature in detail — its architecture, how the components interact, data flow, and key design decisions.',
+                'fix': 'Analyze this feature for potential bugs, code smells, anti-patterns, and suggest fixes with corrected code.',
+                'recreate': 'Provide step-by-step instructions to recreate this feature from scratch. Include file structure, dependencies, configuration, and complete code for each component. Format as a guide that can be followed by a developer or Copilot agent.'
+            };
+
+            const question = actionQuestions[action];
+            if (!question) return;
+
+            // Close the modal
+            if (featureBrowserModal) {
+                featureBrowserModal.classList.remove('active');
+            }
+
+            // Send with pre-filled question
+            vscode.postMessage({
+                type: 'useFeatureAsContext',
+                feature: feature,
+                userQuestion: question
+            });
         }
 
         function showToast(message) {
@@ -2545,7 +2656,7 @@ Please answer the user's question using the feature context above. Reference spe
 
             switch (message.type) {
                 case 'addMessage':
-                    addMessage(message.role, message.content, message.showActions);
+                    addMessage(message.role, message.content, message.showActions, message.quickActions);
                     sendButton.disabled = false;
                     break;
                 case 'startTyping':
