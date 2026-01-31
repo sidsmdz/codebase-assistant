@@ -36,7 +36,7 @@ export class KnowledgeBaseManager {
     private termIndexer!: TermIndexer;
 
     constructor(private context: vscode.ExtensionContext) {
-        this.dbPath = path.join(context.globalStorageUri.fsPath, 'opencat.db');
+        this.dbPath = path.join(context.globalStorageUri.fsPath, 'autoforge.db');
     }
 
     async initialize(): Promise<void> {
@@ -76,7 +76,7 @@ export class KnowledgeBaseManager {
         } catch (error) {
             this.isReady = false;
             console.error('Failed to initialize KB:', error);
-            vscode.window.showErrorMessage(`OpenCat failed to initialize its knowledge base. Some features may not work. Error: ${error}`);
+            vscode.window.showErrorMessage(`AutoForge failed to initialize its knowledge base. Some features may not work. Error: ${error}`);
         }
     }
 
@@ -244,7 +244,7 @@ export class KnowledgeBaseManager {
         path: string;
     }> {
         if (!this.isReady) {
-            vscode.window.showErrorMessage('OpenCat Knowledge Base is not available.');
+            vscode.window.showErrorMessage('AutoForge Knowledge Base is not available.');
             return { patternCount: 0, astNodeCount: 0, termCount: 0, indexedFilesCount: 0, featureCount: 0, componentCount: 0, path: 'N/A' };
         }
 
@@ -280,7 +280,7 @@ export class KnowledgeBaseManager {
         astNodes?: ASTNode[]
     ): Promise<SavedPattern> {
         if (!this.isReady) {
-            vscode.window.showErrorMessage('OpenCat Knowledge Base is not available.');
+            vscode.window.showErrorMessage('AutoForge Knowledge Base is not available.');
             throw new Error('Knowledge Base not initialized.');
         }
 
@@ -403,7 +403,7 @@ export class KnowledgeBaseManager {
 
     async getAllPatterns(): Promise<SavedPattern[]> {
         if (!this.isReady) {
-            vscode.window.showErrorMessage('OpenCat Knowledge Base is not available.');
+            vscode.window.showErrorMessage('AutoForge Knowledge Base is not available.');
             return [];
         }
 
@@ -431,7 +431,7 @@ export class KnowledgeBaseManager {
 
     async deletePattern(patternId: string): Promise<void> {
         if (!this.isReady) {
-            vscode.window.showErrorMessage('OpenCat Knowledge Base is not available.');
+            vscode.window.showErrorMessage('AutoForge Knowledge Base is not available.');
             return;
         }
 
@@ -451,7 +451,7 @@ export class KnowledgeBaseManager {
 
     async clearAllData(): Promise<void> {
         if (!this.isReady) {
-            vscode.window.showErrorMessage('OpenCat Knowledge Base is not available.');
+            vscode.window.showErrorMessage('AutoForge Knowledge Base is not available.');
             return;
         }
 

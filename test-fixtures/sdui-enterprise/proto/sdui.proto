@@ -1,0 +1,117 @@
+syntax = "proto3";
+
+package com.sdui.grpc;
+
+service LayoutService {
+  rpc GetLayout (GetLayoutRequest) returns (LayoutResponse);
+  rpc StreamLayoutUpdates (LayoutSubscription) returns (stream LayoutUpdate);
+  rpc SubmitAction (ActionRequest) returns (ActionResponse);
+}
+
+service GridDataService {
+  rpc FetchGridData (GridDataRequest) returns (GridDataResponse);
+  rpc StreamGridUpdates (GridSubscription) returns (stream GridDataUpdate);
+}
+
+service EventService {
+  rpc PublishEvent (EventMessage) returns (EventAck);
+  rpc SubscribeEvents (EventSubscription) returns (stream EventMessage);
+}
+
+message GetLayoutRequest {
+  string screen_id = 1;
+  string session_id = 2;
+}
+
+message LayoutResponse {
+  string screen_id = 1;
+  repeated ComponentDefinition components = 2;
+  string title = 3;
+  string theme = 4;
+}
+
+message LayoutSubscription {
+  string screen_id = 1;
+  string session_id = 2;
+}
+
+message LayoutUpdate {
+  string update_type = 1;
+  string screen_id = 2;
+  repeated ComponentDefinition changed_components = 3;
+}
+
+message ComponentDefinition {
+  string id = 1;
+  string type = 2;
+  string config_json = 3;
+  repeated string child_ids = 4;
+}
+
+message ActionRequest {
+  string action_type = 1;
+  string component_id = 2;
+  string payload_json = 3;
+  string session_id = 4;
+}
+
+message ActionResponse {
+  string result_type = 1;
+  string payload_json = 2;
+  bool success = 3;
+}
+
+message GridDataRequest {
+  string grid_id = 1;
+  int32 page = 2;
+  int32 page_size = 3;
+  string sort_field = 4;
+  string sort_direction = 5;
+}
+
+message GridDataResponse {
+  string grid_id = 1;
+  repeated GridRow rows = 2;
+  int32 total_count = 3;
+  int32 page = 4;
+}
+
+message GridRow {
+  string row_id = 1;
+  repeated GridCell cells = 2;
+}
+
+message GridCell {
+  string column_id = 1;
+  string value = 2;
+  string type = 3;
+}
+
+message GridSubscription {
+  string grid_id = 1;
+  string session_id = 2;
+}
+
+message GridDataUpdate {
+  string grid_id = 1;
+  string update_type = 2;
+  repeated GridRow changed_rows = 3;
+}
+
+message EventMessage {
+  string event_id = 1;
+  string event_type = 2;
+  string source = 3;
+  string payload_json = 4;
+  int64 timestamp = 5;
+}
+
+message EventAck {
+  string event_id = 1;
+  bool acknowledged = 2;
+}
+
+message EventSubscription {
+  string session_id = 1;
+  repeated string event_types = 2;
+}

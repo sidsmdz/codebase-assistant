@@ -1,6 +1,6 @@
 {
-  "name": "opencat",
-  "displayName": "OpenCat",
+  "name": "autoforge",
+  "displayName": "AutoForge",
   "description": "AI code assistant with company knowledge",
   "version": "0.2.0",
   "publisher": "your-company",
@@ -18,14 +18,14 @@
   "activationEvents": [],
   "contributes": {
     "configuration": {
-      "title": "OpenCat",
+      "title": "AutoForge",
       "properties": {
-        "opencat.framework.language": {
+        "autoforge.framework.language": {
           "type": "string",
           "default": "java",
           "description": "The primary programming language of your project."
         },
-        "opencat.framework.types": {
+        "autoforge.framework.types": {
           "type": "object",
           "default": {
             "controller": [
@@ -43,7 +43,7 @@
           },
           "description": "Keywords to identify different component types in your framework."
         },
-        "opencat.ingestion.include": {
+        "autoforge.ingestion.include": {
           "type": "array",
           "default": [
             "**/*.java",
@@ -57,17 +57,17 @@
     "viewsContainers": {
       "activitybar": [
         {
-          "id": "opencat",
-          "title": "OpenCat",
+          "id": "autoforge",
+          "title": "AutoForge",
           "icon": "media/icon.svg"
         }
       ]
     },
     "views": {
-      "opencat": [
+      "autoforge": [
         {
           "type": "webview",
-          "id": "opencat.chatViewV2",
+          "id": "autoforge.chatViewV2",
           "name": "Chat",
           "icon": "media/icon.svg"
         }
@@ -75,24 +75,24 @@
     },
     "commands": [
       {
-        "command": "opencat.openChat",
-        "title": "OpenCat: Open Chat"
+        "command": "autoforge.openChat",
+        "title": "AutoForge: Open Chat"
       },
       {
-        "command": "opencat.showKBStats",
-        "title": "OpenCat: Show Knowledge Base Stats"
+        "command": "autoforge.showKBStats",
+        "title": "AutoForge: Show Knowledge Base Stats"
       },
       {
-        "command": "opencat.listPatterns",
-        "title": "OpenCat: List Saved Patterns"
+        "command": "autoforge.listPatterns",
+        "title": "AutoForge: List Saved Patterns"
       },
       {
-        "command": "opencat.ingestWorkspace",
-        "title": "OpenCat: Index Workspace"
+        "command": "autoforge.ingestWorkspace",
+        "title": "AutoForge: Index Workspace"
       },
       {
-        "command": "opencat.resetKnowledgeBase",
-        "title": "OpenCat: Reset Knowledge Base"
+        "command": "autoforge.resetKnowledgeBase",
+        "title": "AutoForge: Reset Knowledge Base"
       }
     ]
   },
@@ -110,6 +110,7 @@
     "test:coverage": "jest --coverage"
   },
   "devDependencies": {
+    "@babel/preset-env": "^7.28.6",
     "@jest/globals": "^30.2.0",
     "@types/jest": "^30.0.0",
     "@types/node": "^20.10.0",

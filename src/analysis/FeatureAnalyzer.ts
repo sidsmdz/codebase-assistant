@@ -38,6 +38,12 @@ export type ComponentType =
     | 'event-handler'   // Event/message handlers
     | 'middleware'      // Middleware/interceptors
     | 'config'          // Configuration
+    | 'builder'         // Builder pattern
+    | 'factory'         // Factory/Creator pattern
+    | 'strategy'        // Strategy/Policy pattern
+    | 'observer'        // Observer/Listener/Subscriber pattern
+    | 'singleton'       // Singleton pattern
+    | 'adapter'         // Adapter/Wrapper pattern
     | 'unknown';
 
 export interface Feature {
@@ -67,6 +73,7 @@ export interface DependencyInfo {
 
 export class FeatureAnalyzer {
     private components: Map<string, FeatureComponent> = new Map();
+    private componentsByName: Map<string, FeatureComponent[]> = new Map();
     private features: Map<string, Feature> = new Map();
     private dependencyGraph: Map<string, Set<string>> = new Map();
     private reverseDependencyGraph: Map<string, Set<string>> = new Map();
@@ -84,6 +91,14 @@ export class FeatureAnalyzer {
             if (component) {
                 components.push(component);
                 this.components.set(component.id, component);
+
+                // Index by name for multi-module disambiguation
+                const lowerName = component.name.toLowerCase();
+                if (!this.componentsByName.has(lowerName)) {
+                    this.componentsByName.set(lowerName, []);
+                }
+                this.componentsByName.get(lowerName)!.push(component);
+
                 this.updateDependencyGraph(component);
             }
         }
@@ -134,7 +149,33 @@ export class FeatureAnalyzer {
         const code = node.code || '';
         const name = node.identifier.toLowerCase();
 
-        // Check annotations first (most reliable for Java/Spring)
+        // Design pattern detection (by naming convention) - check FIRST so
+        // patterns like NotificationBuilder aren't swallowed by @Component → service
+        if (name.endsWith('builder')) {
+            return 'builder';
+        }
+        if (name.endsWith('factory') || name.endsWith('creator')) {
+            return 'factory';
+        }
+        if (name.endsWith('strategy') || name.endsWith('policy')) {
+            return 'strategy';
+        }
+        if (name.endsWith('observer') || name.endsWith('listener') || name.endsWith('subscriber')) {
+            return 'observer';
+        }
+        if (name.endsWith('adapter') || name.endsWith('wrapper')) {
+            return 'adapter';
+        }
+
+        // Design pattern detection (by code structure)
+        // Singleton: must DEFINE getInstance, not just call it
+        if (code.includes('private static instance') ||
+            /static\s+getInstance\s*\(/.test(code) ||
+            /static\s+get\s+instance\s*\(/.test(code)) {
+            return 'singleton';
+        }
+
+        // Check annotations (most reliable for Java/Spring)
         if (annotations.some(a => ['@RestController', '@Controller', '@RequestMapping'].includes(a))) {
             return 'controller';
         }
@@ -147,8 +188,22 @@ export class FeatureAnalyzer {
         if (annotations.some(a => ['@Entity', '@Table', '@Document'].includes(a))) {
             return 'model';
         }
+        if (code.includes('.build()') && (code.includes('return this') || code.includes('return new'))) {
+            return 'builder';
+        }
+        if (/create\w+\(/.test(code) && code.includes('return new')) {
+            return 'factory';
+        }
+        if (code.includes('implements Strategy') || code.includes('implements Policy')) {
+            return 'strategy';
+        }
 
         // Check naming conventions
+        // React hooks by convention start with "use" followed by uppercase letter
+        const originalName = node.identifier;
+        if (originalName.startsWith('use') && originalName.length > 3 && originalName[3] >= 'A' && originalName[3] <= 'Z') {
+            return 'hook';
+        }
         if (name.endsWith('controller') || name.endsWith('handler') || name.endsWith('endpoint')) {
             return 'controller';
         }
@@ -168,13 +223,18 @@ export class FeatureAnalyzer {
             return 'api-client';
         }
 
-        // Check code patterns
-        if (code.includes('useState') || code.includes('useEffect') || code.includes('useMemo')) {
-            return 'hook';
-        }
-        if (code.includes('React.') || code.includes('render(') || code.includes('return (') && code.includes('<')) {
+        // Check code patterns - React
+        // Components with JSX are 'component'; pure hook files without JSX are 'hook'
+        const hasJSX = code.includes('return (') && code.includes('<') || code.includes('React.');
+        const hasHooks = code.includes('useState') || code.includes('useEffect') || code.includes('useMemo');
+        if (hasJSX) {
             return 'component';
         }
+        if (hasHooks) {
+            return 'hook';
+        }
+
+        // Check code patterns - Java/backend
         if (code.includes('@GetMapping') || code.includes('@PostMapping') || code.includes('router.') || code.includes('app.get')) {
             return 'controller';
         }
@@ -185,8 +245,8 @@ export class FeatureAnalyzer {
             return 'repository';
         }
 
-        // Check for middleware patterns
-        if (code.includes('next(') || code.includes('interceptor') || code.includes('filter')) {
+        // Check for middleware patterns (more specific to avoid false positives)
+        if (code.includes('next(') && (code.includes('middleware') || code.includes('interceptor'))) {
             return 'middleware';
         }
 
@@ -353,8 +413,8 @@ export class FeatureAnalyzer {
         }
 
         for (const depName of component.dependencies) {
-            // Try to find the component by name
-            const depComponent = this.findComponentByName(depName);
+            // Try to find the component by name, using referrer path for disambiguation
+            const depComponent = this.findComponentByName(depName, component.filePath);
             if (depComponent) {
                 this.dependencyGraph.get(component.id)!.add(depComponent.id);
 
@@ -373,15 +433,44 @@ export class FeatureAnalyzer {
     /**
      * Find component by name
      */
-    private findComponentByName(name: string): FeatureComponent | undefined {
-        for (const [, component] of this.components) {
-            if (component.name === name ||
-                component.name.toLowerCase() === name.toLowerCase() ||
-                component.exports.includes(name)) {
-                return component;
+    private findComponentByName(name: string, referrerFilePath?: string): FeatureComponent | undefined {
+        const lowerName = name.toLowerCase();
+        const candidates = this.componentsByName.get(lowerName) || [];
+
+        if (candidates.length === 0) {
+            // Try matching against exports
+            for (const [, component] of this.components) {
+                if (component.exports.includes(name)) {
+                    return component;
+                }
+            }
+            return undefined;
+        }
+
+        if (candidates.length === 1) {
+            return candidates[0];
+        }
+
+        // Multiple candidates - disambiguate by proximity to referrer
+        if (referrerFilePath) {
+            const referrerDir = referrerFilePath.substring(0, referrerFilePath.lastIndexOf('/'));
+
+            // Prefer same directory
+            const sameDir = candidates.find(c => c.filePath.startsWith(referrerDir + '/'));
+            if (sameDir) {
+                return sameDir;
+            }
+
+            // Prefer same parent directory (module-level)
+            const parentDir = referrerDir.substring(0, referrerDir.lastIndexOf('/'));
+            const sameParent = candidates.find(c => c.filePath.startsWith(parentDir + '/'));
+            if (sameParent) {
+                return sameParent;
             }
         }
-        return undefined;
+
+        // Fallback: return first candidate
+        return candidates[0];
     }
 
     /**
@@ -454,7 +543,7 @@ export class FeatureAnalyzer {
             }
 
             for (const depName of component.dependencies) {
-                const depComponent = this.findComponentByName(depName);
+                const depComponent = this.findComponentByName(depName, component.filePath);
                 if (depComponent && depComponent.id !== component.id) {
                     this.dependencyGraph.get(component.id)!.add(depComponent.id);
 
@@ -483,19 +572,24 @@ export class FeatureAnalyzer {
         this.rebuildDependencyGraph();
 
         const features: Feature[] = [];
-        const processedComponents = new Set<string>();
 
         // Find all entry points
         const entryPoints = Array.from(this.components.values())
             .filter(c => this.isEntryPoint(c));
 
-        for (const entryPoint of entryPoints) {
-            if (processedComponents.has(entryPoint.id)) {
-                continue;
-            }
+        // Secondary pass: components with no dependents but has dependencies (potential orphan entry points)
+        const additionalEntryPoints = Array.from(this.components.values())
+            .filter(c => !this.isEntryPoint(c) &&
+                         !['model', 'config', 'util', 'unknown'].includes(c.type) &&
+                         c.dependents.length === 0 &&
+                         c.dependencies.length > 0);
 
-            // Trace dependencies from this entry point
-            const featureComponents = this.traceFeature(entryPoint, processedComponents);
+        const allEntryPoints = [...entryPoints, ...additionalEntryPoints];
+
+        for (const entryPoint of allEntryPoints) {
+            // Each feature gets its own visited set (allows shared components across features)
+            const visited = new Set<string>();
+            const featureComponents = this.traceFeature(entryPoint, visited);
 
             if (featureComponents.length > 0) {
                 const feature = this.buildFeature(entryPoint, featureComponents);
@@ -504,18 +598,45 @@ export class FeatureAnalyzer {
             }
         }
 
-        return features;
+        // Post-process: merge related features (same domain or high component overlap)
+        const mergedFeatures = this.mergeRelatedFeatures(features);
+
+        return mergedFeatures;
     }
 
     /**
      * Check if component is an entry point
      */
     private isEntryPoint(component: FeatureComponent): boolean {
-        return ['controller', 'event-handler', 'component', 'hook'].includes(component.type) ||
-               component.annotations.some(a =>
-                   ['@RestController', '@Controller', '@GetMapping', '@PostMapping',
-                    '@GrpcService', '@EventListener', '@MessageMapping'].includes(a)
-               );
+        // Check by component type
+        if (['controller', 'event-handler', 'component', 'hook', 'observer'].includes(component.type)) {
+            return true;
+        }
+
+        // Check by annotation
+        if (component.annotations.some(a =>
+            ['@RestController', '@Controller', '@GetMapping', '@PostMapping',
+             '@GrpcService', '@EventListener', '@MessageMapping',
+             '@KafkaListener', '@RabbitListener', '@StreamListener',
+             '@Scheduled', '@Async', '@SpringBootApplication'].includes(a)
+        )) {
+            return true;
+        }
+
+        // Check by code patterns - router registrations, main methods, route components
+        const code = component.code || '';
+        if (code.includes('router.get(') || code.includes('router.post(') ||
+            code.includes('app.get(') || code.includes('app.post(') || code.includes('app.use(')) {
+            return true;
+        }
+        if (code.includes('<Route') || code.includes('useRouter(')) {
+            return true;
+        }
+        if (code.includes('public static void main(')) {
+            return true;
+        }
+
+        return false;
     }
 
     /**
@@ -582,10 +703,18 @@ export class FeatureAnalyzer {
         name = name.replace(/Controller$/, '')
                    .replace(/Handler$/, '')
                    .replace(/Component$/, '')
-                   .replace(/Service$/, '');
+                   .replace(/Service$/, '')
+                   .replace(/Renderer$/, '')
+                   .replace(/Observer$/, '')
+                   .replace(/Manager$/, '')
+                   .replace(/Factory$/, '')
+                   .replace(/Builder$/, '');
 
-        // Convert to readable format
-        return name.replace(/([A-Z])/g, ' $1').trim();
+        // Convert camelCase to readable format, keeping acronyms together
+        // e.g. "SDUIRenderer" -> "SDUI", "GridDataService" -> "Grid Data"
+        return name.replace(/([A-Z]+)([A-Z][a-z])/g, '$1 $2')
+                   .replace(/([a-z])([A-Z])/g, '$1 $2')
+                   .trim();
     }
 
     /**
@@ -706,10 +835,125 @@ export class FeatureAnalyzer {
     }
 
     /**
+     * Merge related features that share the same domain or have high component overlap
+     */
+    private mergeRelatedFeatures(features: Feature[]): Feature[] {
+        if (features.length <= 1) {
+            return features;
+        }
+
+        // Strategy 1: Merge by domain name prefix
+        const domainGroups = new Map<string, Feature[]>();
+        for (const feature of features) {
+            const domain = this.extractDomainName(feature.name);
+            if (!domainGroups.has(domain)) {
+                domainGroups.set(domain, []);
+            }
+            domainGroups.get(domain)!.push(feature);
+        }
+
+        let merged: Feature[] = [];
+        for (const [domain, group] of domainGroups) {
+            if (group.length === 1) {
+                merged.push(group[0]);
+            } else {
+                merged.push(this.mergeFeatureGroup(domain, group));
+            }
+        }
+
+        // Strategy 2: Merge features with >50% component overlap
+        merged = this.mergeByComponentOverlap(merged, 0.5);
+
+        // Re-register merged features
+        this.features.clear();
+        for (const feature of merged) {
+            this.features.set(feature.id, feature);
+        }
+
+        return merged;
+    }
+
+    /**
+     * Extract domain name from feature name for grouping
+     * e.g. "Order" from "Order Controller", "Order Web Socket"
+     */
+    private extractDomainName(featureName: string): string {
+        const words = featureName.trim().split(/\s+/);
+        const genericSuffixes = ['web', 'socket', 'ws', 'grpc', 'rest', 'api', 'event', 'message', 'stream', 'management'];
+        const meaningful = words.filter(w => !genericSuffixes.includes(w.toLowerCase()));
+        return meaningful.join(' ') || words[0];
+    }
+
+    /**
+     * Merge a group of features into a single feature
+     */
+    private mergeFeatureGroup(domain: string, features: Feature[]): Feature {
+        const allEntryPoints = [...new Set(features.flatMap(f => f.entryPoints))];
+        const allComponents = [...new Set(features.flatMap(f => f.components))];
+        const allLanguages = [...new Set(features.flatMap(f => f.languages))];
+        const allFrameworks = [...new Set(features.flatMap(f => f.frameworks))];
+        const allTags = [...new Set(features.flatMap(f => f.tags))];
+        const allFlows = features.flatMap(f => f.flow);
+
+        // Deduplicate flows
+        const flowKeys = new Set<string>();
+        const uniqueFlows = allFlows.filter(f => {
+            const key = `${f.from}->${f.to}`;
+            if (flowKeys.has(key)) { return false; }
+            flowKeys.add(key);
+            return true;
+        });
+
+        return {
+            id: `feature-merged-${domain.toLowerCase().replace(/\s+/g, '-')}`,
+            name: domain.endsWith('Management') ? domain : `${domain} Management`,
+            description: `Merged feature: ${features.map(f => f.name).join(', ')} (${allComponents.length} components across ${allLanguages.length} language(s))`,
+            entryPoints: allEntryPoints,
+            components: allComponents,
+            languages: allLanguages,
+            frameworks: allFrameworks,
+            tags: allTags,
+            flow: uniqueFlows
+        };
+    }
+
+    /**
+     * Merge features with significant component overlap
+     */
+    private mergeByComponentOverlap(features: Feature[], threshold: number): Feature[] {
+        const result = [...features];
+        let merged = true;
+
+        while (merged) {
+            merged = false;
+            for (let i = 0; i < result.length; i++) {
+                for (let j = i + 1; j < result.length; j++) {
+                    const setA = new Set(result[i].components);
+                    const setB = new Set(result[j].components);
+                    const intersection = [...setA].filter(c => setB.has(c));
+                    const smaller = Math.min(setA.size, setB.size);
+
+                    if (smaller > 0 && intersection.length / smaller >= threshold) {
+                        const mergedName = this.extractDomainName(result[i].name);
+                        result[i] = this.mergeFeatureGroup(mergedName, [result[i], result[j]]);
+                        result.splice(j, 1);
+                        merged = true;
+                        break;
+                    }
+                }
+                if (merged) { break; }
+            }
+        }
+
+        return result;
+    }
+
+    /**
      * Clear all data
      */
     clear(): void {
         this.components.clear();
+        this.componentsByName.clear();
         this.features.clear();
         this.dependencyGraph.clear();
         this.reverseDependencyGraph.clear();

@@ -24,7 +24,7 @@ export class IngestionService {
     async runIngestion() {
         await vscode.window.withProgress({
             location: vscode.ProgressLocation.Notification,
-            title: "OpenCat: Indexing workspace with AST + BM25...",
+            title: "AutoForge: Indexing workspace with AST + BM25...",
             cancellable: true
         }, async (progress, token) => {
 

@@ -68,6 +68,7 @@ Use these as reference for coding style, patterns, architecture, and conventions
             prompt += `**Description:** ${feature.description}\n`;
             prompt += `**Languages:** ${feature.languages.join(', ')}\n`;
             prompt += `**Frameworks:** ${feature.frameworks.join(', ') || 'None detected'}\n`;
+            prompt += `**Entry Points:** ${feature.entryPoints.length}\n`;
             prompt += `**Tags:** ${feature.tags.slice(0, 8).join(', ')}\n\n`;
 
             // Show the flow diagram
@@ -151,10 +152,16 @@ Use these as reference for coding style, patterns, architecture, and conventions
             'controller': 1,
             'component': 1,
             'hook': 1,
+            'observer': 2,
             'event-handler': 2,
             'middleware': 2,
             'service': 3,
+            'builder': 4,
+            'factory': 4,
+            'strategy': 4,
+            'adapter': 4,
             'api-client': 4,
+            'singleton': 5,
             'repository': 5,
             'model': 6,
             'util': 7,

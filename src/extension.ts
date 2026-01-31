@@ -6,7 +6,7 @@ import { IngestionService } from './ingestionService';
 let kbManager: KnowledgeBaseManager;
 
 export async function activate(context: vscode.ExtensionContext) {
-    console.log('OpenCat extension activating...');
+    console.log('AutoForge extension activating...');
 
     kbManager = new KnowledgeBaseManager(context);
     await kbManager.initialize();
@@ -14,28 +14,28 @@ export async function activate(context: vscode.ExtensionContext) {
     const provider = new ChatViewProvider(context.extensionUri, kbManager);
 
     context.subscriptions.push(
-        vscode.window.registerWebviewViewProvider('opencat.chatViewV2', provider)
+        vscode.window.registerWebviewViewProvider('autoforge.chatViewV2', provider)
     );
 
     context.subscriptions.push(
-        vscode.commands.registerCommand('opencat.openChat', () => {
-            vscode.commands.executeCommand('opencat.chatViewV2.focus');
+        vscode.commands.registerCommand('autoforge.openChat', () => {
+            vscode.commands.executeCommand('autoforge.chatViewV2.focus');
         })
     );
 
     context.subscriptions.push(
-        vscode.commands.registerCommand('opencat.ingestWorkspace', async () => {
+        vscode.commands.registerCommand('autoforge.ingestWorkspace', async () => {
             const ingestService = new IngestionService(kbManager);
             await ingestService.runIngestion();
         })
     );
 
     context.subscriptions.push(
-        vscode.commands.registerCommand('opencat.showKBStats', async () => {
+        vscode.commands.registerCommand('autoforge.showKBStats', async () => {
             const detailedStats = await kbManager.getDetailedStats();
 
             // Build detailed stats message
-            let message = `📊 OpenCat Knowledge Base Statistics\n\n`;
+            let message = `📊 AutoForge Knowledge Base Statistics\n\n`;
 
             // Features & Components (primary data from workspace scan)
             message += `🧩 Features: ${detailedStats.totalFeatures}\n`;
@@ -95,7 +95,7 @@ export async function activate(context: vscode.ExtensionContext) {
             }
 
             // Create output channel to show stats
-            const outputChannel = vscode.window.createOutputChannel('OpenCat Knowledge Base');
+            const outputChannel = vscode.window.createOutputChannel('AutoForge Knowledge Base');
             outputChannel.clear();
             outputChannel.appendLine(message);
             outputChannel.show();
@@ -103,7 +103,7 @@ export async function activate(context: vscode.ExtensionContext) {
     );
 
     context.subscriptions.push(
-        vscode.commands.registerCommand('opencat.resetKnowledgeBase', async () => {
+        vscode.commands.registerCommand('autoforge.resetKnowledgeBase', async () => {
             const confirm = await vscode.window.showWarningMessage(
                 '⚠️ This will delete ALL patterns and indexed data from the knowledge base. This cannot be undone!',
                 { modal: true },
@@ -126,7 +126,7 @@ export async function activate(context: vscode.ExtensionContext) {
     );
 
     context.subscriptions.push(
-        vscode.commands.registerCommand('opencat.listPatterns', async () => {
+        vscode.commands.registerCommand('autoforge.listPatterns', async () => {
             // Show features instead of individual patterns
             console.log('Browse KB: Fetching features...');
 
@@ -144,7 +144,7 @@ export async function activate(context: vscode.ExtensionContext) {
                 // Try to get feature stats to debug
                 const stats = await kbManager.getFeatureStats();
                 console.log('Browse KB: Feature stats:', JSON.stringify(stats));
-                vscode.window.showInformationMessage('No features found. Run "OpenCat: Index Workspace" to analyze your codebase!');
+                vscode.window.showInformationMessage('No features found. Run "AutoForge: Index Workspace" to analyze your codebase!');
                 return;
             }
 
@@ -214,7 +214,7 @@ export async function activate(context: vscode.ExtensionContext) {
                     }
                 } else if (action?.action === 'details') {
                     // Show detailed feature information
-                    const outputChannel = vscode.window.createOutputChannel('OpenCat Feature Details');
+                    const outputChannel = vscode.window.createOutputChannel('AutoForge Feature Details');
                     outputChannel.clear();
                     outputChannel.appendLine(`🎯 Feature: ${selected.feature.name}\n`);
                     outputChannel.appendLine('═'.repeat(60));
@@ -259,7 +259,7 @@ export async function activate(context: vscode.ExtensionContext) {
                     outputChannel.show();
                 } else if (action?.action === 'flow') {
                     // Show data flow visualization
-                    const outputChannel = vscode.window.createOutputChannel('OpenCat Data Flow');
+                    const outputChannel = vscode.window.createOutputChannel('AutoForge Data Flow');
                     outputChannel.clear();
                     outputChannel.appendLine(`🔄 Data Flow: ${selected.feature.name}\n`);
                     outputChannel.appendLine('═'.repeat(60));
@@ -292,7 +292,7 @@ export async function activate(context: vscode.ExtensionContext) {
         })
     );
 
-    console.log('OpenCat activated successfully');
+    console.log('AutoForge activated successfully');
 }
 
 export function deactivate() {}

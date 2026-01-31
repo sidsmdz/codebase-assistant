@@ -37,7 +37,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
         _token: vscode.CancellationToken,
     ) {
 
-        console.log('OpenCat: resolveWebviewView called');
+        console.log('AutoForge: resolveWebviewView called');
         this._view = webviewView;
 
         webviewView.webview.options = {
@@ -202,12 +202,12 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
                 this._view?.webview.postMessage({
                     type: 'addMessage',
                     role: 'assistant',
-                    content: '❌ Copilot unavailable. Make sure GitHub Copilot Chat is installed and active. Check the Output panel (OpenCat) for details.'
+                    content: '❌ Copilot unavailable. Make sure GitHub Copilot Chat is installed and active. Check the Output panel (AutoForge) for details.'
                 });
             }
 
         } catch (error) {
-            console.error('OpenCat error:', error);
+            console.error('AutoForge error:', error);
             this._view?.webview.postMessage({
                 type: 'addMessage',
                 role: 'assistant',
@@ -334,7 +334,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
             }
 
             // Log all available models for debugging
-            console.log(`OpenCat: Available models: ${allModels.map(m => m.id).join(', ')}`);
+            console.log(`AutoForge: Available models: ${allModels.map(m => m.id).join(', ')}`);
 
             // Prefer known-working models, sorted by preference
             const preferredModelPatterns = ['gpt-4o', 'gpt-4', 'gpt-3.5', 'claude', 'copilot'];
@@ -351,7 +351,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
             const errors: string[] = [];
             for (const model of sortedModels) {
                 try {
-                    console.log(`OpenCat: Trying model "${model.id}" (vendor: ${model.vendor})`);
+                    console.log(`AutoForge: Trying model "${model.id}" (vendor: ${model.vendor})`);
 
                     const messages = [vscode.LanguageModelChatMessage.User(prompt)];
                     const chatResponse = await model.sendRequest(
@@ -365,18 +365,18 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
                         fullResponse += fragment;
                     }
 
-                    console.log(`OpenCat: Success with model "${model.id}"`);
+                    console.log(`AutoForge: Success with model "${model.id}"`);
                     return fullResponse;
                 } catch (modelError: unknown) {
                     const msg = modelError instanceof Error ? modelError.message : String(modelError);
-                    console.warn(`OpenCat: Model "${model.id}" failed: ${msg}`);
+                    console.warn(`AutoForge: Model "${model.id}" failed: ${msg}`);
                     errors.push(`${model.id}: ${msg}`);
                     // Continue to try the next model
                 }
             }
 
             // All models failed
-            console.error(`OpenCat: All ${sortedModels.length} models failed:\n${errors.join('\n')}`);
+            console.error(`AutoForge: All ${sortedModels.length} models failed:\n${errors.join('\n')}`);
             return null;
 
         } catch (error: unknown) {
@@ -385,7 +385,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
 
             if (errMsg.includes('consent') || errMsg.includes('permission') || errMsg.includes('access')) {
                 vscode.window.showWarningMessage(
-                    'OpenCat needs permission to use Copilot. Please allow access when prompted.',
+                    'AutoForge needs permission to use Copilot. Please allow access when prompted.',
                     'Try Again'
                 );
             }
@@ -803,12 +803,12 @@ ${userQuestion}
                 this._view?.webview.postMessage({
                     type: 'addMessage',
                     role: 'assistant',
-                    content: '❌ Copilot unavailable. Make sure GitHub Copilot Chat is installed and active. Check the Output panel (OpenCat) for details.'
+                    content: '❌ Copilot unavailable. Make sure GitHub Copilot Chat is installed and active. Check the Output panel (AutoForge) for details.'
                 });
             }
 
         } catch (error) {
-            console.error('OpenCat feature context error:', error);
+            console.error('AutoForge feature context error:', error);
             this._view?.webview.postMessage({
                 type: 'addMessage',
                 role: 'assistant',
@@ -895,7 +895,12 @@ ${userQuestion}
     <meta http-equiv="Pragma" content="no-cache" />
     <meta http-equiv="Expires" content="0" />
     <!-- Version: ${timestamp} -->
-    <title>OpenCat v0.2.0</title>
+    <title>AutoForge v0.2.0</title>
+    <!-- Mermaid.js for Architecture Diagrams -->
+    <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+    <!-- Highlight.js for Code Syntax Highlighting -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
 
@@ -904,6 +909,14 @@ ${userQuestion}
             --primary-hover: var(--vscode-button-hoverBackground);
             --border-radius: 8px;
             --message-spacing: 16px;
+            --user-message-bg: linear-gradient(135deg, #0078d4 0%, #106ebe 100%);
+            --assistant-message-bg: linear-gradient(135deg, #2d2d30 0%, #1e1e1e 100%);
+            --code-bg: #1e1e1e;
+            --diagram-bg: #f8f8f8;
+            --success-color: #4caf50;
+            --warning-color: #ff9800;
+            --error-color: #f44336;
+            --info-color: #2196f3;
         }
 
         body {
@@ -1072,23 +1085,115 @@ ${userQuestion}
         }
 
         .message.user {
-            background: linear-gradient(135deg, rgba(0, 122, 204, 0.15), rgba(0, 122, 204, 0.08));
+            background: var(--user-message-bg);
             align-self: flex-end;
-            border: 1px solid rgba(0, 122, 204, 0.3);
+            border: 1px solid rgba(0, 122, 204, 0.4);
             border-bottom-right-radius: 4px;
-            box-shadow: 0 2px 8px rgba(0, 122, 204, 0.1);
+            box-shadow: 0 4px 12px rgba(0, 122, 204, 0.25);
+            color: #ffffff;
         }
 
         .message.assistant {
-            background: linear-gradient(135deg, rgba(76, 175, 80, 0.1), rgba(76, 175, 80, 0.04));
+            background: var(--assistant-message-bg);
             align-self: flex-start;
-            border: 1px solid rgba(76, 175, 80, 0.2);
+            border: 1px solid rgba(76, 175, 80, 0.3);
             border-bottom-left-radius: 4px;
-            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+            border-left: 4px solid var(--success-color);
         }
 
         .message.assistant strong {
-            color: var(--vscode-textLink-foreground);
+            color: #4fc3f7;
+            font-weight: 600;
+        }
+
+        /* Code Block Styling */
+        .message pre {
+            background: var(--code-bg);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 6px;
+            padding: 16px;
+            overflow-x: auto;
+            margin: 12px 0;
+            position: relative;
+            box-shadow: inset 0 2px 8px rgba(0, 0, 0, 0.3);
+        }
+
+        .message pre code {
+            font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
+            font-size: 13px;
+            line-height: 1.6;
+            color: #d4d4d4;
+        }
+
+        .message code {
+            background: rgba(110, 118, 129, 0.2);
+            padding: 2px 6px;
+            border-radius: 3px;
+            font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
+            font-size: 12px;
+            color: #f48771;
+        }
+
+        /* Mermaid Diagram Styling */
+        .mermaid-container {
+            background: linear-gradient(135deg, rgba(255, 255, 255, 0.95), rgba(245, 245, 245, 0.95));
+            border: 2px solid rgba(0, 122, 204, 0.3);
+            border-radius: var(--border-radius);
+            padding: 24px;
+            margin: 16px 0;
+            box-shadow: 0 4px 16px rgba(0, 0, 0, 0.1);
+            overflow-x: auto;
+        }
+
+        .mermaid {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 200px;
+        }
+
+        .diagram-title {
+            font-size: 14px;
+            font-weight: 700;
+            color: var(--info-color);
+            margin-bottom: 12px;
+            text-align: center;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+
+        /* Info/Warning/Error Boxes */
+        .info-box {
+            background: linear-gradient(135deg, rgba(33, 150, 243, 0.15), rgba(33, 150, 243, 0.05));
+            border-left: 4px solid var(--info-color);
+            padding: 12px 16px;
+            border-radius: 6px;
+            margin: 12px 0;
+        }
+
+        .warning-box {
+            background: linear-gradient(135deg, rgba(255, 152, 0, 0.15), rgba(255, 152, 0, 0.05));
+            border-left: 4px solid var(--warning-color);
+            padding: 12px 16px;
+            border-radius: 6px;
+            margin: 12px 0;
+        }
+
+        .error-box {
+            background: linear-gradient(135deg, rgba(244, 67, 54, 0.15), rgba(244, 67, 54, 0.05));
+            border-left: 4px solid var(--error-color);
+            padding: 12px 16px;
+            border-radius: 6px;
+            margin: 12px 0;
+        }
+
+        .success-box {
+            background: linear-gradient(135deg, rgba(76, 175, 80, 0.15), rgba(76, 175, 80, 0.05));
+            border-left: 4px solid var(--success-color);
+            padding: 12px 16px;
+            border-radius: 6px;
+            margin: 12px 0;
         }
 
         .message-content {
@@ -2043,7 +2148,7 @@ ${userQuestion}
 <body>
     <div id="header">
         <div id="header-title">
-            <span>🐱 OpenCat</span>
+            <span>⚡ AutoForge</span>
         </div>
         <div id="kb-stats">
             <div class="stat-item" title="Features">
@@ -2062,8 +2167,8 @@ ${userQuestion}
     </div>
 
     <div id="welcome-screen">
-        <div class="welcome-icon">🐱</div>
-        <div class="welcome-title">Welcome to OpenCat!</div>
+        <div class="welcome-icon">⚡</div>
+        <div class="welcome-title">Welcome to AutoForge!</div>
         <div class="welcome-subtitle">Your AI-powered code assistant with knowledge base</div>
 
         <div class="example-prompts">
@@ -2100,7 +2205,7 @@ ${userQuestion}
             <div class="typing-dot"></div>
             <div class="typing-dot"></div>
         </div>
-        <span>OpenCat is thinking...</span>
+        <span>AutoForge is thinking...</span>
     </div>
 
     <div id="save-form-container">
@@ -2147,7 +2252,7 @@ ${userQuestion}
         <textarea
             id="message-input"
             rows="3"
-            placeholder="Ask OpenCat anything... (Shift+Enter for new line, Enter to send)"
+            placeholder="Ask AutoForge anything... (Shift+Enter for new line, Enter to send)"
         ></textarea>
         <div class="utility-btns">
             <button class="utility-btn" id="send-button" title="Send message">▶</button>
@@ -2208,6 +2313,40 @@ ${userQuestion}
     <script>
         (function() {
             try {
+        // Initialize Mermaid for diagrams
+        if (typeof mermaid !== 'undefined') {
+            mermaid.initialize({
+                startOnLoad: true,
+                theme: 'dark',
+                themeVariables: {
+                    primaryColor: '#0078d4',
+                    primaryTextColor: '#fff',
+                    primaryBorderColor: '#0078d4',
+                    lineColor: '#4fc3f7',
+                    secondaryColor: '#4caf50',
+                    tertiaryColor: '#ff9800',
+                    background: '#1e1e1e',
+                    mainBkg: '#2d2d30',
+                    secondBkg: '#252526',
+                    textColor: '#d4d4d4',
+                    fontSize: '14px'
+                },
+                flowchart: {
+                    useMaxWidth: true,
+                    htmlLabels: true,
+                    curve: 'basis'
+                }
+            });
+        }
+
+        // Initialize Highlight.js for syntax highlighting
+        if (typeof hljs !== 'undefined') {
+            hljs.configure({
+                ignoreUnescapedHTML: true,
+                languages: ['java', 'typescript', 'javascript', 'python', 'json', 'xml', 'sql', 'bash']
+            });
+        }
+        
         const vscode = acquireVsCodeApi();
         const messagesDiv = document.getElementById('messages');
         const welcomeScreen = document.getElementById('welcome-screen');
@@ -2997,7 +3136,7 @@ ${userQuestion}
             } catch (error) {
                 console.error('ERROR IN WEBVIEW SCRIPT:', error);
                 console.error('Stack:', error.stack);
-                alert('Error initializing OpenCat: ' + error.message);
+                alert('Error initializing AutoForge: ' + error.message);
             }
         })();
     </script>

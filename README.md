@@ -1,8 +1,8 @@
-# OpenCat - AI Code Assistant with Codebase Knowledge Base
+# AutoForge - AI Code Assistant with Codebase Knowledge Base
 
 **v0.2.0** | VS Code Extension | GitHub Copilot Integration
 
-OpenCat is a VS Code extension that scans your workspace, builds a knowledge base of features, components, and data flows, then uses this context to power intelligent AI conversations through GitHub Copilot.
+AutoForge is a VS Code extension that scans your workspace, builds a knowledge base of features, components, and data flows, then uses this context to power intelligent AI conversations through GitHub Copilot.
 
 ## What It Does
 
@@ -10,6 +10,37 @@ OpenCat is a VS Code extension that scans your workspace, builds a knowledge bas
 2. **Discovers features** - Traces dependencies from controllers through services to repositories, grouping components into end-to-end features
 3. **Tracks data flows** - Maps calls, imports, injections, and events between components
 4. **Powers AI chat** - Sends rich feature context (code, data flows, dependencies, entry points) to GitHub Copilot for context-aware responses
+
+## Why AutoForge? What Plain Copilot Can't Do
+
+GitHub Copilot is powerful, but it works file-by-file. It sees your current editor tab and maybe a few open files. It doesn't understand your architecture. AutoForge fixes that by building a **persistent knowledge base** of your entire codebase and feeding Copilot the right context automatically.
+
+| Capability | Plain Copilot (@workspace) | AutoForge + Copilot |
+|---|---|---|
+| **Context scope** | Current file + open tabs | Full knowledge base: all features, components, data flows across every file |
+| **Feature awareness** | None - treats files individually | Auto-discovers end-to-end features (Controller → Service → Repository) |
+| **Dependency tracing** | Implicit from imports in visible files | Explicit dependency graph across all files, modules, and languages |
+| **Data flow visibility** | None | Maps calls, injections, events, imports between components with flow diagrams |
+| **Prompt quality** | Your raw question + file snippets | Enriched prompt with architecture layers, flow diagrams, entry points, annotations |
+| **Search** | Keyword/filename matching | Hybrid search: AST structure + BM25 relevance ranking + fuzzy matching |
+| **Architecture knowledge** | Infers from code patterns | Knows component types, frameworks, design patterns, entry points explicitly |
+| **Conversation context** | Per-message, no memory | Stateful history with feature context carried across follow-ups |
+
+### How It Works Under the Hood
+
+When you ask a question, AutoForge doesn't just forward it to Copilot. It:
+
+1. **Searches the knowledge base** using hybrid search (AST + BM25 + fuzzy) to find relevant features
+2. **Builds a rich prompt** with the matching feature's full context:
+   - Data flow diagram showing how components connect
+   - All component code, sorted by architectural layer (entry point → service → data access)
+   - Dependency and reverse-dependency lists
+   - Framework annotations and entry point markers
+3. **Sends the enriched prompt** to Copilot, so it generates code that follows your project's actual patterns
+
+The result: Copilot responses that understand your architecture, follow your conventions, and reference your actual components - not generic examples.
+
+> For a visual walkthrough, open `demo/autoforge-demo.html` in a browser.
 
 ## Quick Start
 
@@ -27,25 +58,25 @@ npm run compile
 ### First Use
 
 1. Open the Command Palette (`Ctrl+Shift+P`)
-2. Run **OpenCat: Index Workspace** to scan your codebase
-3. Open the OpenCat sidebar panel to start chatting
+2. Run **AutoForge: Index Workspace** to scan your codebase
+3. Open the AutoForge sidebar panel to start chatting
 4. Click **Browse Features** to explore what was discovered
 
 ## Commands
 
 | Command | Description |
 |---------|-------------|
-| `OpenCat: Index Workspace` | Scan all source files, build AST, discover features and data flows |
-| `OpenCat: Open Chat` | Open the AI chat sidebar |
-| `OpenCat: Show KB Stats` | Display features, components, data flows, languages, frameworks |
-| `OpenCat: List Saved Patterns` | Browse features with quick pick - view components, data flow, details |
-| `OpenCat: Reset Knowledge Base` | Clear all indexed data |
+| `AutoForge: Index Workspace` | Scan all source files, build AST, discover features and data flows |
+| `AutoForge: Open Chat` | Open the AI chat sidebar |
+| `AutoForge: Show KB Stats` | Display features, components, data flows, languages, frameworks |
+| `AutoForge: List Saved Patterns` | Browse features with quick pick - view components, data flow, details |
+| `AutoForge: Reset Knowledge Base` | Clear all indexed data |
 
 ## Features
 
 ### Workspace Scanning & Feature Discovery
 - Parses `.java`, `.ts`, `.tsx`, `.js`, `.jsx` files
-- Identifies 12 component types: controller, service, repository, model, component, hook, api-client, event-handler, middleware, config, util
+- Identifies 18 component types: controller, service, repository, model, component, hook, api-client, event-handler, middleware, config, util, builder, factory, strategy, observer, singleton, adapter
 - Tracks 5 dependency types: import, inject, call, extend, implement
 - Incremental indexing with SHA-256 change detection
 - Protocol Buffer parser for cross-language gRPC tracking
@@ -103,7 +134,7 @@ src/
     TermIndexer.ts             # BM25 term indexing
 
 demo/
-  opencat-demo.html           # Auto-playing presentation with UI mockups
+  autoforge-demo.html           # Auto-playing presentation with UI mockups
 ```
 
 ## Tech Stack
@@ -131,6 +162,33 @@ The knowledge base uses 11 SQLite tables:
 - **term_index** - BM25 full-text search index
 - **doc_stats / collection_stats** - Search ranking statistics
 - **indexed_files** - File tracking for incremental indexing
+
+## Roadmap
+
+### Agentic Mode (Planned)
+
+AutoForge currently sends one-shot enriched prompts to Copilot. Agentic Mode will enable autonomous multi-step task execution where the AI reasons, acts, observes results, and iterates.
+
+**Capabilities:**
+- **Tool-use loop** - The agent iterates: reason → pick tool → execute → observe → reason again, until the task is complete
+- **Available tools** - File read/write, terminal commands, Copilot queries, knowledge base search, test runner, git operations
+- **Multi-step tasks** - "Refactor this feature" becomes: analyze current code → plan changes → edit files → run tests → fix failures → commit
+- **Decision making** - The agent inspects intermediate results (test output, lint errors, build logs) and adapts its plan
+- **Feature-aware refactoring** - Uses the knowledge base to understand which components are affected, traces the full dependency chain before making changes
+- **Safety guards** - Requires user confirmation before destructive operations (file writes, git push, deletions)
+
+**Planned architecture:**
+- `AgentLoop` - Manages the reason-act-observe cycle with configurable step limit
+- `ToolRegistry` - Registers available tools (FileReadTool, FileWriteTool, TerminalTool, CopilotTool, KBSearchTool)
+- `PlanExecutor` - Breaks high-level user requests into discrete steps using KB context
+- `SafetyGuard` - Confirmation prompts before destructive operations
+
+### Enhanced Feature Tracking (Planned)
+
+- **Design pattern recognition** - Detect Builder, Factory, Strategy, Observer, Singleton, Adapter patterns by structure, not just naming
+- **Feature merging** - Automatically group related entry points (e.g., `OrderController` + `OrderWebSocket` → "Order Management")
+- **Cross-language feature tracing** - Features spanning Java backends + TypeScript frontends via shared API contracts and Proto definitions
+- **Shared component awareness** - Services used by multiple features are tracked across all of them, not just the first
 
 ## Requirements
 
