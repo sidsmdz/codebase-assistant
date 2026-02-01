@@ -82,8 +82,8 @@ export async function renderContextReferences(stream: vscode.ChatResponseStream,
         return;
     }
 
-    const totalDataFlows = info.features.reduce((sum, f) => sum + f.dataFlowCount, 0);
-    const totalComponents = info.features.reduce((sum, f) => sum + f.componentCount, 0);
+    const totalDataFlows = info.features.reduce((sum: number, f: any) => sum + f.dataFlowCount, 0);
+    const totalComponents = info.features.reduce((sum: number, f: any) => sum + f.componentCount, 0);
     const refCount = totalReferences + (totalDataFlows > 0 ? 1 : 0);
 
     stream.markdown('---\n\n');

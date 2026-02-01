@@ -34,7 +34,7 @@ export async function showDisambiguationUI(
     stream.markdown(`\n💡 Reply with the number (e.g., "1" or "2") to explain that feature.\n`);
     
     // Store disambiguation state
-    await sessionManager.storePendingDisambiguation(
+    sessionManager.storePendingDisambiguation(
         features.map(f => ({ id: f.id, name: f.name, description: f.description }))
     );
     

@@ -7,26 +7,33 @@ import { SessionManager } from '../SessionManager';
 // Command routing
 import { resolveCommandAlias } from './commandRouter';
 
-// Handlers (gradually extract these from chatParticipant.ts)
+// Handlers - All extracted!
 import { handleScan } from './handlers/scanHandler';
-
-// Import remaining handlers from old file (temporary - will extract these next)
-import { 
-    registerChatParticipant as legacyRegister
-} from '../chatParticipant';
+import { handleExplain } from './handlers/explainHandler';
+import { handleAnalyze } from './handlers/analyzeHandler';
+import { handleFeatures } from './handlers/featuresHandler';
+import { handleStats } from './handlers/statsHandler';
+import { handleReset } from './handlers/resetHandler';
+import { handleTrace } from './handlers/traceHandler';
+import { handleImpact } from './handlers/impactHandler';
+import { handleSessions } from './handlers/sessionsHandler';
+import { handleSession } from './handlers/sessionHandler';
+import { handleGenerate } from './handlers/generateHandler';
+import { handleAsk } from './handlers/askHandler';
+import { handleQuestion } from './handlers/questionHandler';
 
 /**
- * NEW MODULAR ARCHITECTURE
+ * MODULAR ARCHITECTURE - COMPLETE ✅
  * 
- * This is the new entry point for the refactored chat participant.
- * We're gradually extracting handlers from the monolithic chatParticipant.ts
- * into modular files.
+ * All handlers have been successfully extracted from the monolithic chatParticipant.ts.
  * 
- * Progress:
- * ✅ Command aliases supported
- * ✅ Utilities extracted (helpers, continueHandler, disambiguator)
- * ✅ scanHandler extracted
- * 🔄 Remaining handlers: To be extracted incrementally
+ * Completed:
+ * ✅ Command aliases supported (/g, /e, /a, /i, /t, /s, /f)
+ * ✅ All utilities extracted (helpers, continueHandler, disambiguator)
+ * ✅ All 13 handlers extracted:
+ *    - scanHandler, explainHandler, analyzeHandler, featuresHandler, statsHandler
+ *    - resetHandler, traceHandler, impactHandler, sessionsHandler, sessionHandler
+ *    - generateHandler, askHandler, questionHandler
  */
 export function registerChatParticipant(
     extContext: vscode.ExtensionContext,
@@ -47,41 +54,75 @@ export function registerChatParticipant(
             token: vscode.CancellationToken
         ): Promise<vscode.ChatResult> => {
             
-            // ✨ NEW: Resolve command aliases (/g → /generate, etc.)
+            // ✨ Resolve command aliases (/g → /generate, /e → /explain, etc.)
             const resolvedCommand = resolveCommandAlias(request.command);
             
-            // Route to appropriate handler
-            // As we extract handlers, we'll replace the switch cases
-            // For now, delegate to the legacy implementation for most commands
-            
-            if (resolvedCommand === 'scan') {
-                // ✅ Using extracted handler
-                await handleScan(stream, kbManager, token, onScanComplete);
-                return { metadata: { command: 'scan' } };
+            try {
+                // Route to appropriate handler based on command
+                switch (resolvedCommand) {
+                    case 'scan':
+                        await handleScan(stream, kbManager, token, onScanComplete);
+                        return { metadata: { command: 'scan' } };
+
+                    case 'explain':
+                        await handleExplain(request, stream, kbManager, contextBuilder, selectionAnalyzer, sessionManager, token);
+                        return { metadata: { command: 'explain' } };
+
+                    case 'analyze':
+                        await handleAnalyze(request, stream, kbManager, selectionAnalyzer, token);
+                        return { metadata: { command: 'analyze' } };
+
+                    case 'features':
+                        await handleFeatures(stream, kbManager, token);
+                        return { metadata: { command: 'features' } };
+
+                    case 'stats':
+                        await handleStats(stream, kbManager, token);
+                        return { metadata: { command: 'stats' } };
+
+                    case 'reset':
+                        await handleReset(stream, kbManager, token);
+                        return { metadata: { command: 'reset' } };
+
+                    case 'trace':
+                        await handleTrace(request, stream, kbManager, selectionAnalyzer, token);
+                        return { metadata: { command: 'trace' } };
+
+                    case 'impact':
+                        await handleImpact(request, stream, kbManager, selectionAnalyzer, token);
+                        return { metadata: { command: 'impact' } };
+
+                    case 'sessions':
+                        await handleSessions(stream, sessionManager, token);
+                        return { metadata: { command: 'sessions' } };
+
+                    case 'session':
+                        await handleSession(request, stream, sessionManager, token);
+                        return { metadata: { command: 'session' } };
+
+                    case 'generate':
+                        await handleGenerate(request, stream, kbManager, sessionManager, token);
+                        return { metadata: { command: 'generate' } };
+
+                    case 'ask':
+                        await handleAsk(request, stream, kbManager, selectionAnalyzer, token);
+                        return { metadata: { command: 'ask' } };
+
+                    default:
+                        // No command or unrecognized command → handle as question
+                        const result = await handleQuestion(request, chatContext, stream, kbManager, contextBuilder, selectionAnalyzer, sessionManager, token);
+                        return { 
+                            metadata: { 
+                                command: 'question',
+                                ...result.analysisContext
+                            } 
+                        };
+                }
+            } catch (error) {
+                stream.markdown(`⚠️ An error occurred: ${error instanceof Error ? error.message : String(error)}`);
+                console.error('Chat participant error:', error);
+                return { metadata: { command: resolvedCommand, error: true } };
             }
-            
-            // For other commands, delegate to legacy implementation
-            // (We'll extract these handlers incrementally)
-            const legacyParticipant = legacyRegister(extContext, kbManager, sessionManager, onScanComplete);
-            
-            // Create a modified request with resolved command
-            const modifiedRequest = {
-                ...request,
-                command: resolvedCommand
-            };
-            
-            // Call the legacy handler (temporary)
-            const result = await (legacyParticipant as any)._handler(
-                modifiedRequest,
-                chatContext,
-                stream,
-                token
-            );
-            
-            // Clean up the temporary participant
-            legacyParticipant.dispose();
-            
-            return result;
         }
     );
 
