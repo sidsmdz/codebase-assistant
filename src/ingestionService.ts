@@ -153,6 +153,24 @@ export class IngestionService {
                 const modules = await this.moduleDetector.detectModules(workspaceFolders[0].uri.fsPath);
                 console.log(`📦 Detected ${modules.length} module(s):`, modules.map(m => m.name).join(', '));
                 
+                // If no modules detected, treat entire workspace as single module
+                if (modules.length === 0) {
+                    console.log('No build files detected. Treating workspace as single module.');
+                    const singleModule = {
+                        id: 'workspace-root',
+                        name: path.basename(workspaceFolders[0].uri.fsPath),
+                        path: workspaceFolders[0].uri.fsPath,
+                        type: 'unknown' as const,
+                        language: 'mixed' as const,
+                        dependencies: [],
+                        features: []
+                    };
+                    modules.push(singleModule);
+                    // Manually add to detector for getModuleForFile to work
+                    this.moduleDetector['modules'].set(singleModule.id, singleModule);
+                    this.moduleDetector['modulesByPath'].set(singleModule.path, singleModule);
+                }
+                
                 // Save module information to KB
                 await this.kbManager.saveModules(modules);
             }
