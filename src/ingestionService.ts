@@ -7,18 +7,21 @@ import { JavaASTParser } from './parsers/JavaASTParser';
 import { TypeScriptASTParser } from './parsers/TypeScriptASTParser';
 import { ASTNode } from './parsers/ASTParser';
 import { FeatureAnalyzer } from './analysis/FeatureAnalyzer';
+import { ModuleDetector } from './analysis/ModuleDetector';
 
 export class IngestionService {
     private javaParser: JavaASTParser;
     private tsParser: TypeScriptASTParser;
     private jsParser: TypeScriptASTParser;
     private featureAnalyzer: FeatureAnalyzer;
+    private moduleDetector: ModuleDetector;
 
     constructor(private kbManager: KnowledgeBaseManager) {
         this.javaParser = new JavaASTParser();
         this.tsParser = new TypeScriptASTParser(true);  // TypeScript
         this.jsParser = new TypeScriptASTParser(false); // JavaScript
         this.featureAnalyzer = new FeatureAnalyzer();
+        this.moduleDetector = new ModuleDetector();
     }
 
     async runIngestion() {
@@ -142,11 +145,54 @@ export class IngestionService {
                 }
             }
 
-            // Phase 2: Identify and save features from analyzed components
+            // Phase 2: Detect modules in multi-module projects
+            progress.report({ message: "🔍 Detecting project modules..." });
+            
+            const workspaceFolders = vscode.workspace.workspaceFolders;
+            if (workspaceFolders && workspaceFolders.length > 0) {
+                const modules = await this.moduleDetector.detectModules(workspaceFolders[0].uri.fsPath);
+                console.log(`📦 Detected ${modules.length} module(s):`, modules.map(m => m.name).join(', '));
+                
+                // Save module information to KB
+                await this.kbManager.saveModules(modules);
+            }
+
+            // Phase 3: Identify and save features from analyzed components
             progress.report({ message: "🔍 Identifying features..." });
 
             const features = this.featureAnalyzer.identifyFeatures();
             const components = this.featureAnalyzer.getComponents();
+
+            // Associate features with modules
+            for (const feature of features) {
+                // Find module for first component in feature
+                const firstComponent = components.find(c => c.id === feature.components[0]);
+                if (firstComponent) {
+                    const module = this.moduleDetector.getModuleForFile(firstComponent.filePath);
+                    if (module) {
+                        feature.module = module.name;
+                        feature.modulePath = module.path;
+                        this.moduleDetector.addFeatureToModule(feature.id, firstComponent.filePath);
+                    }
+                }
+
+                // Detect cross-module dependencies
+                for (const compId of feature.components) {
+                    const comp = components.find(c => c.id === compId);
+                    if (comp) {
+                        const compModule = this.moduleDetector.getModuleForFile(comp.filePath);
+                        if (compModule && compModule.name !== feature.module) {
+                            // This component is from a different module - cross-module dependency
+                            if (!feature.crossModuleDeps) {
+                                feature.crossModuleDeps = [];
+                            }
+                            // Find other features in that module
+                            const otherModuleFeatures = this.moduleDetector.getModuleFeatures(compModule.name);
+                            feature.crossModuleDeps.push(...otherModuleFeatures.filter(f => f !== feature.id));
+                        }
+                    }
+                }
+            }
 
             if (components.length > 0) {
                 progress.report({ message: `💾 Saving ${components.length} components...` });
@@ -161,9 +207,14 @@ export class IngestionService {
             const featureStats = this.featureAnalyzer.getStats();
             console.log('Feature Analysis Stats:', featureStats);
 
+            const modules = this.moduleDetector.getAllModules();
+            const moduleInfo = modules.length > 1 
+                ? ` across ${modules.length} modules (${modules.map(m => m.name).join(', ')})`
+                : '';
+
             const message = filesSkipped > 0
-                ? `✅ Indexed ${features.length} features with ${components.length} components from ${filesProcessed} files! Skipped ${filesSkipped} unchanged files.`
-                : `✅ Indexed ${features.length} features with ${components.length} components from ${filesProcessed} files!`;
+                ? `✅ Indexed ${features.length} features with ${components.length} components from ${filesProcessed} files${moduleInfo}! Skipped ${filesSkipped} unchanged files.`
+                : `✅ Indexed ${features.length} features with ${components.length} components from ${filesProcessed} files${moduleInfo}!`;
 
             vscode.window.showInformationMessage(message);
         });

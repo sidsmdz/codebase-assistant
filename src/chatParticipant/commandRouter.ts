@@ -9,7 +9,8 @@ export const COMMAND_ALIASES: Record<string, string> = {
     'i': 'impact',
     't': 'trace',
     's': 'scan',
-    'f': 'features'
+    'f': 'features',
+    'm': 'modules'
 };
 
 /**

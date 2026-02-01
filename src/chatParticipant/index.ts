@@ -21,6 +21,7 @@ import { handleSession } from './handlers/sessionHandler';
 import { handleGenerate } from './handlers/generateHandler';
 import { handleAsk } from './handlers/askHandler';
 import { handleQuestion } from './handlers/questionHandler';
+import { handleModules } from './handlers/modulesHandler';
 
 /**
  * MODULAR ARCHITECTURE - COMPLETE ✅
@@ -107,6 +108,10 @@ export function registerChatParticipant(
                     case 'ask':
                         await handleAsk(request, stream, kbManager, selectionAnalyzer, token);
                         return { metadata: { command: 'ask' } };
+
+                    case 'modules':
+                        const modulesResult = await handleModules(request, stream, kbManager, token);
+                        return { metadata: { command: 'modules', hasCode: modulesResult.hasCode } };
 
                     default:
                         // No command or unrecognized command → handle as question

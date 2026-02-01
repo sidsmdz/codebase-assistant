@@ -56,6 +56,9 @@ export interface Feature {
     frameworks: string[];       // Frameworks detected (spring, react, etc.)
     tags: string[];
     flow: FeatureFlow[];        // The data/call flow through the feature
+    module?: string;            // Module name for multi-module projects (e.g., "permissions", "onboarding")
+    modulePath?: string;        // Path to module root
+    crossModuleDeps?: string[]; // Feature IDs from other modules this depends on
 }
 
 export interface FeatureFlow {

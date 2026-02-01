@@ -193,7 +193,10 @@ export class KnowledgeBaseManager {
                 languages_json TEXT,
                 frameworks_json TEXT,
                 tags_json TEXT,
-                flow_json TEXT
+                flow_json TEXT,
+                module TEXT,
+                module_path TEXT,
+                cross_module_deps_json TEXT
             );
         `);
 
@@ -206,6 +209,19 @@ export class KnowledgeBaseManager {
                 PRIMARY KEY(feature_id, component_id),
                 FOREIGN KEY(feature_id) REFERENCES features(id) ON DELETE CASCADE,
                 FOREIGN KEY(component_id) REFERENCES feature_components(id) ON DELETE CASCADE
+            );
+        `);
+
+        // Project modules table (NEW - for multi-module projects)
+        this.db.run(`
+            CREATE TABLE IF NOT EXISTS project_modules (
+                id TEXT PRIMARY KEY,
+                name TEXT NOT NULL,
+                path TEXT NOT NULL,
+                type TEXT NOT NULL,
+                language TEXT NOT NULL,
+                dependencies_json TEXT,
+                features_json TEXT
             );
         `);
 
@@ -806,8 +822,9 @@ export class KnowledgeBaseManager {
             this.db.run(`
                 INSERT OR REPLACE INTO features
                 (id, name, description, entry_points_json, components_json,
-                 languages_json, frameworks_json, tags_json, flow_json)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 languages_json, frameworks_json, tags_json, flow_json,
+                 module, module_path, cross_module_deps_json)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             `, [
                 feature.id,
                 feature.name,
@@ -817,7 +834,10 @@ export class KnowledgeBaseManager {
                 JSON.stringify(feature.languages),
                 JSON.stringify(feature.frameworks),
                 JSON.stringify(feature.tags),
-                JSON.stringify(feature.flow)
+                JSON.stringify(feature.flow),
+                feature.module || null,
+                feature.modulePath || null,
+                feature.crossModuleDeps ? JSON.stringify(feature.crossModuleDeps) : null
             ]);
 
             // Create feature-component mappings
@@ -898,7 +918,10 @@ export class KnowledgeBaseManager {
                     languages: JSON.parse(obj.languages_json || '[]'),
                     frameworks: JSON.parse(obj.frameworks_json || '[]'),
                     tags: JSON.parse(obj.tags_json || '[]'),
-                    flow: JSON.parse(obj.flow_json || '[]')
+                    flow: JSON.parse(obj.flow_json || '[]'),
+                    module: obj.module || undefined,
+                    modulePath: obj.module_path || undefined,
+                    crossModuleDeps: obj.cross_module_deps_json ? JSON.parse(obj.cross_module_deps_json) : undefined
                 } as Feature;
             });
         } catch (error) {
@@ -937,12 +960,22 @@ export class KnowledgeBaseManager {
                 languages: JSON.parse(obj.languages_json || '[]'),
                 frameworks: JSON.parse(obj.frameworks_json || '[]'),
                 tags: JSON.parse(obj.tags_json || '[]'),
-                flow: JSON.parse(obj.flow_json || '[]')
+                flow: JSON.parse(obj.flow_json || '[]'),
+                module: obj.module || undefined,
+                modulePath: obj.module_path || undefined,
+                crossModuleDeps: obj.cross_module_deps_json ? JSON.parse(obj.cross_module_deps_json) : undefined
             } as Feature;
         } catch (error) {
             console.error('Error getting feature by ID:', error);
             return null;
         }
+    }
+
+    /**
+     * Get a feature by ID (alias for getFeatureById for convenience)
+     */
+    async getFeature(featureId: string): Promise<Feature | null> {
+        return this.getFeatureById(featureId);
     }
 
     /**
@@ -1218,10 +1251,174 @@ export class KnowledgeBaseManager {
             this.db.run("DELETE FROM feature_component_map");
             this.db.run("DELETE FROM features");
             this.db.run("DELETE FROM feature_components");
+            this.db.run("DELETE FROM project_modules");
             await this.saveDatabase();
             console.log('Feature data cleared');
         } catch (error) {
             console.error('Error clearing feature data:', error);
         }
     }
+
+    /**
+     * Save project modules to database
+     */
+    async saveModules(modules: any[]): Promise<void> {
+        if (!this.isReady) {
+            return;
+        }
+
+        try {
+            // Clear existing modules
+            this.db.run("DELETE FROM project_modules");
+
+            const stmt = this.db.prepare(`
+                INSERT OR REPLACE INTO project_modules 
+                (id, name, path, type, language, dependencies_json, features_json)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+            `);
+
+            for (const module of modules) {
+                stmt.run([
+                    module.id,
+                    module.name,
+                    module.path,
+                    module.type,
+                    module.language,
+                    JSON.stringify(module.dependencies || []),
+                    JSON.stringify(module.features || [])
+                ]);
+            }
+
+            stmt.free();
+            await this.saveDatabase();
+            console.log(`Saved ${modules.length} modules to KB`);
+        } catch (error) {
+            console.error('Error saving modules:', error);
+        }
+    }
+
+    /**
+     * Get all modules
+     */
+    async getAllModules(): Promise<any[]> {
+        if (!this.isReady) {
+            return [];
+        }
+
+        try {
+            const result = this.db.exec("SELECT * FROM project_modules");
+            if (!result[0]) {
+                return [];
+            }
+
+            return result[0].values.map(row => ({
+                id: row[0],
+                name: row[1],
+                path: row[2],
+                type: row[3],
+                language: row[4],
+                dependencies: JSON.parse(row[5] as string),
+                features: JSON.parse(row[6] as string)
+            }));
+        } catch (error) {
+            console.error('Error getting modules:', error);
+            return [];
+        }
+    }
+
+    /**
+     * Get features by module name
+     */
+    async getFeaturesByModule(moduleName: string): Promise<Feature[]> {
+        if (!this.isReady) {
+            return [];
+        }
+
+        try {
+            const result = this.db.exec(
+                "SELECT * FROM features WHERE module = ?",
+                [moduleName]
+            );
+
+            if (!result[0]) {
+                return [];
+            }
+
+            return result[0].values.map(row => ({
+                id: row[0] as string,
+                name: row[1] as string,
+                description: row[2] as string,
+                entryPoints: JSON.parse(row[3] as string),
+                components: JSON.parse(row[4] as string),
+                languages: JSON.parse(row[5] as string),
+                frameworks: JSON.parse(row[6] as string),
+                tags: JSON.parse(row[7] as string),
+                flow: JSON.parse(row[8] as string),
+                module: row[9] as string | undefined,
+                modulePath: row[10] as string | undefined,
+                crossModuleDeps: row[11] ? JSON.parse(row[11] as string) : undefined
+            }));
+        } catch (error) {
+            console.error('Error getting features by module:', error);
+            return [];
+        }
+    }
+
+    /**
+     * Search features with module filtering
+     */
+    async searchFeaturesInModule(query: string, moduleName: string, limit: number = 5): Promise<Feature[]> {
+        const allFeatures = await this.searchFeatures(query, limit * 2); // Get more to filter
+        return allFeatures
+            .filter(f => f.module === moduleName)
+            .slice(0, limit);
+    }
+
+    /**
+     * Get cross-module dependencies for a feature
+     */
+    async getCrossModuleDependencies(featureId: string): Promise<{
+        fromModule: string;
+        toModule: string;
+        relatedFeatures: Feature[];
+    }[]> {
+        if (!this.isReady) {
+            return [];
+        }
+
+        try {
+            const feature = await this.getFeature(featureId);
+            if (!feature || !feature.crossModuleDeps || !feature.module) {
+                return [];
+            }
+
+            const result: any[] = [];
+            const seenModules = new Set<string>();
+
+            for (const depFeatureId of feature.crossModuleDeps) {
+                const depFeature = await this.getFeature(depFeatureId);
+                if (depFeature && depFeature.module && depFeature.module !== feature.module) {
+                    const moduleKey = `${feature.module}-${depFeature.module}`;
+                    if (!seenModules.has(moduleKey)) {
+                        seenModules.add(moduleKey);
+                        
+                        // Get all features in the dependency module
+                        const relatedFeatures = await this.getFeaturesByModule(depFeature.module);
+                        
+                        result.push({
+                            fromModule: feature.module,
+                            toModule: depFeature.module,
+                            relatedFeatures
+                        });
+                    }
+                }
+            }
+
+            return result;
+        } catch (error) {
+            console.error('Error getting cross-module dependencies:', error);
+            return [];
+        }
+    }
 }
+
