@@ -9,16 +9,16 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 
+import com.sdui.util.Observable;
+
 @Component
-public class SideEffectEngine {
+public class SideEffectEngine extends Observable {
 
     @Autowired
     private NotificationService notificationService;
 
     @Autowired
     private SessionManager sessionManager;
-
-    private final List<SideEffectObserver> observers = new ArrayList<>();
 
     public void processSideEffects(ActionResult result) {
         String resultType = result.getType();
@@ -50,14 +50,6 @@ public class SideEffectEngine {
     public void cleanupSession(String sessionId) {
         sessionManager.removeSession(sessionId);
         notifyObservers("SESSION_CLEANUP", Map.of("sessionId", sessionId));
-    }
-
-    public void addObserver(SideEffectObserver observer) {
-        observers.add(observer);
-    }
-
-    public void removeObserver(SideEffectObserver observer) {
-        observers.remove(observer);
     }
 
     private void notifyObservers(String eventType, Map<String, Object> data) {

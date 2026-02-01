@@ -66,7 +66,7 @@ export async function checkDisambiguationResponse(
 
     if (selectedIndex >= 0 && selectedIndex < totalFeatures) {
         // Clear disambiguation state
-        await sessionManager.clearPendingDisambiguation();
+        sessionManager.clearPendingDisambiguation();
         return { featureIndex: selectedIndex, totalFeatures };
     }
 
