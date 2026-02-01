@@ -1,0 +1,45 @@
+syntax = "proto3";
+
+package enterprise.common;
+
+option java_package = "com.enterprise.common.grpc";
+option java_multiple_files = true;
+
+// Common security service for permission checks
+service SecurityService {
+    rpc CheckAccess(CheckAccessRequest) returns (CheckAccessResponse);
+    rpc ValidatePermissions(ValidatePermissionsRequest) returns (ValidatePermissionsResponse);
+}
+
+message CheckAccessRequest {
+    int64 user_id = 1;
+    string resource = 2;
+    string action = 3;
+}
+
+message CheckAccessResponse {
+    bool allowed = 1;
+    string reason = 2;
+}
+
+message ValidatePermissionsRequest {
+    int64 user_id = 1;
+    repeated PermissionCheck checks = 2;
+}
+
+message PermissionCheck {
+    string resource = 1;
+    string action = 2;
+    bool required = 3;
+}
+
+message ValidatePermissionsResponse {
+    bool all_granted = 1;
+    repeated PermissionResult results = 2;
+}
+
+message PermissionResult {
+    string resource = 1;
+    string action = 2;
+    bool granted = 3;
+}

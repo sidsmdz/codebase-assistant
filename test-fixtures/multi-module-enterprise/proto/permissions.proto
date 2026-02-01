@@ -1,0 +1,100 @@
+syntax = "proto3";
+
+package enterprise.permissions;
+
+option java_package = "com.enterprise.permissions.grpc";
+option java_multiple_files = true;
+
+// Permission Service
+service PermissionService {
+    rpc CreatePermission(CreatePermissionRequest) returns (PermissionResponse);
+    rpc CreateRole(CreateRoleRequest) returns (RoleResponse);
+    rpc AssignRole(AssignRoleRequest) returns (AssignRoleResponse);
+    rpc RemoveRole(RemoveRoleRequest) returns (RemoveRoleResponse);
+    rpc GetUserPermissions(GetUserPermissionsRequest) returns (UserPermissionsResponse);
+    rpc CheckPermission(CheckPermissionRequest) returns (CheckPermissionResponse);
+}
+
+message Permission {
+    int64 id = 1;
+    string name = 2;
+    string resource = 3;
+    string action = 4;
+    string description = 5;
+    int64 created_at = 6;
+}
+
+message Role {
+    int64 id = 1;
+    string name = 2;
+    string description = 3;
+    repeated Permission permissions = 4;
+    int64 created_at = 5;
+    int64 updated_at = 6;
+}
+
+message CreatePermissionRequest {
+    string name = 1;
+    string resource = 2;
+    string action = 3;
+    string description = 4;
+}
+
+message PermissionResponse {
+    Permission permission = 1;
+    bool success = 2;
+    string message = 3;
+}
+
+message CreateRoleRequest {
+    string name = 1;
+    string description = 2;
+    repeated string permission_names = 3;
+}
+
+message RoleResponse {
+    Role role = 1;
+    bool success = 2;
+    string message = 3;
+}
+
+message AssignRoleRequest {
+    int64 user_id = 1;
+    string role_name = 2;
+    int64 assigned_by = 3;
+}
+
+message AssignRoleResponse {
+    bool success = 1;
+    string message = 2;
+}
+
+message RemoveRoleRequest {
+    int64 user_id = 1;
+    string role_name = 2;
+}
+
+message RemoveRoleResponse {
+    bool success = 1;
+    string message = 2;
+}
+
+message GetUserPermissionsRequest {
+    int64 user_id = 1;
+}
+
+message UserPermissionsResponse {
+    repeated Permission permissions = 1;
+    repeated Role roles = 2;
+}
+
+message CheckPermissionRequest {
+    int64 user_id = 1;
+    string resource = 2;
+    string action = 3;
+}
+
+message CheckPermissionResponse {
+    bool has_permission = 1;
+    string message = 2;
+}

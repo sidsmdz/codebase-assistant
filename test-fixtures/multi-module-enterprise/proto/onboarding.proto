@@ -1,0 +1,155 @@
+syntax = "proto3";
+
+package enterprise.onboarding;
+
+option java_package = "com.enterprise.onboarding.grpc";
+option java_multiple_files = true;
+
+import "common.proto";
+
+// SDUI Onboarding Service
+service OnboardingService {
+    rpc GetLayout(GetLayoutRequest) returns (LayoutResponse);
+    rpc ProcessAction(ProcessActionRequest) returns (ActionResponse);
+    rpc GetTaskList(GetTaskListRequest) returns (TaskListResponse);
+    rpc UpdateTaskStatus(UpdateTaskStatusRequest) returns (UpdateTaskStatusResponse);
+    rpc GetGridData(GetGridDataRequest) returns (GridDataResponse);
+}
+
+// Layout definitions for SDUI
+message LayoutResponse {
+    string screen_id = 1;
+    LayoutDefinition layout = 2;
+    map<string, string> metadata = 3;
+}
+
+message LayoutDefinition {
+    string type = 1; // "screen", "form", "grid", "list"
+    repeated ComponentDefinition components = 2;
+    LayoutConfig config = 3;
+}
+
+message ComponentDefinition {
+    string id = 1;
+    string type = 2; // "grid", "form", "button", "text", "taskList"
+    map<string, string> props = 3;
+    repeated ComponentDefinition children = 4;
+    PermissionConfig permissions = 5;
+}
+
+message PermissionConfig {
+    string resource = 1;
+    repeated string required_actions = 2;
+    string fallback_behavior = 3; // "hide", "disable", "show_message"
+}
+
+message LayoutConfig {
+    string title = 1;
+    string theme = 2;
+    bool show_navigation = 3;
+    map<string, string> styles = 4;
+}
+
+message GetLayoutRequest {
+    string screen_id = 1;
+    int64 user_id = 2;
+}
+
+// Action processing
+message ProcessActionRequest {
+    string action_type = 1;
+    string component_id = 2;
+    map<string, string> payload = 3;
+    int64 user_id = 4;
+}
+
+message ActionResponse {
+    bool success = 1;
+    string message = 2;
+    LayoutDefinition updated_layout = 3;
+    map<string, string> data = 4;
+}
+
+// Task list
+message GetTaskListRequest {
+    int64 user_id = 1;
+    int64 requester_id = 2;
+}
+
+message TaskListResponse {
+    repeated OnboardingTask tasks = 1;
+    ProgressInfo progress = 2;
+}
+
+message OnboardingTask {
+    int64 id = 1;
+    int64 user_id = 2;
+    string title = 3;
+    string description = 4;
+    string status = 5;
+    int32 sequence = 6;
+    int64 assigned_at = 7;
+    int64 completed_at = 8;
+}
+
+message ProgressInfo {
+    int32 total_tasks = 1;
+    int32 completed_tasks = 2;
+    int32 percentage = 3;
+}
+
+message UpdateTaskStatusRequest {
+    int64 task_id = 1;
+    string status = 2;
+    int64 requester_id = 3;
+}
+
+message UpdateTaskStatusResponse {
+    bool success = 1;
+    string message = 2;
+    OnboardingTask task = 3;
+}
+
+// Grid data
+message GetGridDataRequest {
+    int64 user_id = 1;
+    GridConfig config = 2;
+}
+
+message GridConfig {
+    int32 page = 1;
+    int32 page_size = 2;
+    string sort_by = 3;
+    string sort_direction = 4;
+    repeated FilterCriteria filters = 5;
+}
+
+message FilterCriteria {
+    string field = 1;
+    string operator = 2;
+    string value = 3;
+}
+
+message GridDataResponse {
+    repeated GridRow rows = 1;
+    int32 total_count = 2;
+    int32 page = 3;
+    int32 page_size = 4;
+    repeated ColumnDefinition columns = 5;
+}
+
+message GridRow {
+    map<string, string> cells = 1;
+    string row_id = 2;
+    bool editable = 3;
+    bool deletable = 4;
+}
+
+message ColumnDefinition {
+    string field = 1;
+    string header = 2;
+    string type = 3;
+    bool sortable = 4;
+    bool sensitive = 5;
+    bool visible = 6;
+}
