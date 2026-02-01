@@ -8,6 +8,7 @@
  * 4. Extracting meaningful feature descriptions
  */
 
+import * as path from 'path';
 import { ASTNode } from '../parsers/ASTParser';
 
 export interface FeatureComponent {
@@ -88,6 +89,10 @@ export class FeatureAnalyzer {
         const components: FeatureComponent[] = [];
         const imports = this.extractImports(fileContent, filePath);
         const annotations = this.extractAnnotations(fileContent);
+        
+        if (annotations.length > 0) {
+            console.log(`📝 File ${path.basename(filePath)} has annotations: ${annotations.join(', ')}`);
+        }
 
         for (const node of nodes) {
             const component = this.analyzeNode(node, imports, annotations, fileContent);
@@ -126,7 +131,17 @@ export class FeatureAnalyzer {
         }
 
         const dependencies = this.extractDependencies(node, imports, fileContent);
+        
+        // Extract annotations from the node's code snippet
         const nodeAnnotations = this.extractNodeAnnotations(node.code || '');
+        
+        // Merge with file-level annotations (important for Java where class annotations
+        // may be on lines before the class declaration)
+        const allAnnotations = [...new Set([...annotations, ...nodeAnnotations])];
+        
+        if (allAnnotations.length > 0) {
+            console.log(`  ✨ Component ${node.identifier} (${componentType}) has annotations: ${allAnnotations.join(', ')}`);
+        }
 
         return {
             id: node.id,
@@ -139,7 +154,7 @@ export class FeatureAnalyzer {
             endLine: node.endLine,
             dependencies: dependencies.map(d => d.name),
             dependents: [],
-            annotations: nodeAnnotations,
+            annotations: allAnnotations,
             imports: imports.map(i => i.name),
             exports: this.extractExports(node.code || '', node.language)
         };
@@ -571,6 +586,9 @@ export class FeatureAnalyzer {
      * Identify features by tracing from entry points
      */
     identifyFeatures(): Feature[] {
+        console.log(`\n=== FEATURE IDENTIFICATION START ===`);
+        console.log(`Total components: ${this.components.size}`);
+        
         // First, rebuild dependency graph to ensure cross-file deps are connected
         this.rebuildDependencyGraph();
 
@@ -580,6 +598,12 @@ export class FeatureAnalyzer {
         const entryPoints = Array.from(this.components.values())
             .filter(c => this.isEntryPoint(c));
 
+        console.log(`Found ${entryPoints.length} primary entry points:`);
+        entryPoints.forEach(ep => {
+            console.log(`  - ${ep.name} (${ep.type}) in ${ep.filePath}`);
+            console.log(`    Annotations: ${ep.annotations.join(', ')}`);
+        });
+
         // Secondary pass: components with no dependents but has dependencies (potential orphan entry points)
         const additionalEntryPoints = Array.from(this.components.values())
             .filter(c => !this.isEntryPoint(c) &&
@@ -587,22 +611,54 @@ export class FeatureAnalyzer {
                          c.dependents.length === 0 &&
                          c.dependencies.length > 0);
 
+        console.log(`Found ${additionalEntryPoints.length} additional entry points (orphans with dependencies)`);
+        additionalEntryPoints.forEach(ep => {
+            console.log(`  - ${ep.name} (${ep.type})`);
+        });
+
         const allEntryPoints = [...entryPoints, ...additionalEntryPoints];
+        console.log(`\nTotal entry points to process: ${allEntryPoints.length}`);
+
+        if (allEntryPoints.length === 0) {
+            console.log('⚠️ NO ENTRY POINTS FOUND!');
+            console.log('Component breakdown by type:');
+            const byType: Record<string, number> = {};
+            for (const comp of this.components.values()) {
+                byType[comp.type] = (byType[comp.type] || 0) + 1;
+            }
+            console.log(byType);
+            
+            console.log('\nSample components:');
+            Array.from(this.components.values()).slice(0, 5).forEach(c => {
+                console.log(`  - ${c.name} (${c.type})`);
+                console.log(`    File: ${c.filePath}`);
+                console.log(`    Annotations: ${c.annotations.join(', ') || 'none'}`);
+                console.log(`    Has code: ${!!c.code}`);
+            });
+        }
 
         for (const entryPoint of allEntryPoints) {
             // Each feature gets its own visited set (allows shared components across features)
             const visited = new Set<string>();
             const featureComponents = this.traceFeature(entryPoint, visited);
 
+            console.log(`Traced feature from ${entryPoint.name}: ${featureComponents.length} components`);
+
             if (featureComponents.length > 0) {
                 const feature = this.buildFeature(entryPoint, featureComponents);
+                console.log(`  ✅ Built feature: "${feature.name}" with ${feature.components.length} components`);
                 features.push(feature);
                 this.features.set(feature.id, feature);
             }
         }
 
+        console.log(`\n=== Before merging: ${features.length} features ===`);
+
         // Post-process: merge related features (same domain or high component overlap)
         const mergedFeatures = this.mergeRelatedFeatures(features);
+
+        console.log(`=== After merging: ${mergedFeatures.length} features ===`);
+        console.log(`=== FEATURE IDENTIFICATION END ===\n`);
 
         return mergedFeatures;
     }
@@ -613,6 +669,7 @@ export class FeatureAnalyzer {
     private isEntryPoint(component: FeatureComponent): boolean {
         // Check by component type
         if (['controller', 'event-handler', 'component', 'hook', 'observer'].includes(component.type)) {
+            console.log(`  ✅ ${component.name} is entry point by type: ${component.type}`);
             return true;
         }
 
