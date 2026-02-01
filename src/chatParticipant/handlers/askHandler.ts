@@ -3,6 +3,7 @@ import { KnowledgeBaseManager } from '../../knowledgeBase/KnowledgeBaseManager';
 import { SelectionAnalyzer } from '../../analysis/SelectionAnalyzer';
 import { ContextReferenceInfo } from '../types';
 import { getCodeSelection, renderContextReferences } from '../utilities/helpers';
+import { TokenManager, ContextItem, estimateTokenCount } from '../utilities/tokenManager';
 
 export async function handleAsk(
     request: vscode.ChatRequest,

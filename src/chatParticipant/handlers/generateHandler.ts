@@ -3,6 +3,7 @@ import { KnowledgeBaseManager } from '../../knowledgeBase/KnowledgeBaseManager';
 import { SessionManager } from '../../SessionManager';
 import { ContextReferenceInfo } from '../types';
 import { renderContextReferences } from '../utilities/helpers';
+import { TokenManager, ContextItem, estimateTokenCount } from '../utilities/tokenManager';
 
 export async function handleGenerate(
     request: vscode.ChatRequest,
@@ -29,44 +30,35 @@ export async function handleGenerate(
     stream.progress('Gathering context from knowledge base...');
 
     const workspaceFolders = vscode.workspace.workspaceFolders;
-    let kbContext = '';
     let featureCount = 0;
     let componentCount = 0;
+
+    // Initialize token manager (GPT-4o has 128K context)
+    const tokenManager = new TokenManager(128000, 4000);
+    const contextItems: ContextItem[] = [];
 
     // 1. Query KB directly for features related to the user's intent
     try {
         const relevantFeatures = await kbManager.searchFeatures(userIntent, 5);
         if (relevantFeatures.length > 0) {
-            kbContext += `\n\n## Architecture Context from AutoForge Knowledge Base\n`;
-            for (const feature of relevantFeatures.slice(0, 3)) {
-                kbContext += `\n### Feature: ${feature.name}\n`;
-                kbContext += `${feature.description}\n`;
-                kbContext += `- **Languages:** ${feature.languages.join(', ')}\n`;
-                if (feature.frameworks.length > 0) {
-                    kbContext += `- **Frameworks:** ${feature.frameworks.join(', ')}\n`;
-                }
-                kbContext += `- **Components:** ${feature.components.length}\n`;
-
-                // Get component details for richer context
+            // Convert features to context items with priorities
+            let featureItems = TokenManager.createFeatureItems(relevantFeatures, userIntent);
+            
+            // Enrich with component details
+            featureItems = await TokenManager.enrichFeatureItems(
+                featureItems,
+                (featureId) => kbManager.getComponentsForFeature(featureId)
+            );
+            
+            contextItems.push(...featureItems);
+            
+            featureCount = relevantFeatures.length;
+            
+            // Count components
+            for (const feature of relevantFeatures) {
                 const components = await kbManager.getComponentsForFeature(feature.id);
                 componentCount += components.length;
-                if (components.length > 0) {
-                    kbContext += `- **Key components:** ${components.slice(0, 5).map(c => `${c.name} (${c.type})`).join(', ')}\n`;
-                }
-
-                // Include data flows
-                if (feature.flow && feature.flow.length > 0) {
-                    kbContext += `- **Data flows:** ${feature.flow.length} connections\n`;
-                    for (const flow of feature.flow.slice(0, 5)) {
-                        const fromComp = components.find(c => c.id === flow.from);
-                        const toComp = components.find(c => c.id === flow.to);
-                        if (fromComp && toComp) {
-                            kbContext += `  - ${fromComp.name} → ${toComp.name} (${flow.type})\n`;
-                        }
-                    }
-                }
             }
-            featureCount = relevantFeatures.length;
         }
     } catch (err) {
         console.error('Failed to query KB:', err);
@@ -91,15 +83,26 @@ export async function handleGenerate(
                     }
                 }
 
-                if (mentionedFeatures.size > 0) {
-                    kbContext += `\n\n## Recently Discussed Features\n${Array.from(mentionedFeatures).join(', ')}\n`;
-                }
-
-                if (contextSnippets.length > 0) {
-                    kbContext += `\n\n## Recent Discussion\n`;
-                    contextSnippets.slice(-4).forEach(snippet => {
-                        kbContext += `- ${snippet.substring(0, 200)}\n`;
-                    });
+                // Add session context as lower priority item
+                if (mentionedFeatures.size > 0 || contextSnippets.length > 0) {
+                    let sessionContext = '';
+                    if (mentionedFeatures.size > 0) {
+                        sessionContext += `## Recently Discussed Features\n${Array.from(mentionedFeatures).join(', ')}\n\n`;
+                    }
+                    if (contextSnippets.length > 0) {
+                        sessionContext += `## Recent Discussion\n`;
+                        contextSnippets.slice(-4).forEach(snippet => {
+                            sessionContext += `- ${snippet.substring(0, 200)}\n`;
+                        });
+                    }
+                    
+                    contextItems.push({
+                        content: sessionContext,
+                        type: 'pattern',
+                        name: 'Session Context',
+                        priority: 5, // Medium priority
+                        estimatedTokens: estimateTokenCount(sessionContext)
+                    } as ContextItem);
                 }
             }
         } catch (err) {
@@ -107,8 +110,15 @@ export async function handleGenerate(
         }
     }
 
+    // Optimize context to fit within token limits
+    stream.progress('Optimizing context for token limits...');
+    const optimized = tokenManager.optimizeContext(contextItems, userIntent, 100000);
+    
+    // Show warnings if context was truncated
+    TokenManager.renderTokenWarning(stream, optimized);
+
     // Build final prompt for @workspace
-    const finalPrompt = `${userIntent}${kbContext}\n\n**Please implement this following the architectural patterns and best practices identified above.**`;
+    const finalPrompt = `${userIntent}\n\n${optimized.content}\n\n**Please implement this following the architectural patterns and best practices identified above.**`;
 
     // Build feature details for context references
     const generateFeatureDetails: ContextReferenceInfo['features'] = [];
