@@ -125,29 +125,21 @@ export async function handleGenerate(
         }
     } catch { /* already handled above */ }
 
-    // Show condensed handoff message (2-3 lines)
-    stream.markdown(`🚀 **Forwarding to @workspace** with enriched KB context (${featureCount} features · ${componentCount} components · ${(kbContext.length / 1024).toFixed(1)} KB)\n\n`);
-    stream.markdown(`💡 @workspace will receive your request with architectural patterns from the knowledge base.\n\n`);
-
-    // Trigger workspace participant in same window
+    // Silently hand off to @workspace with enriched context
+    // No verbose messaging - transparent handoff
     try {
         await vscode.commands.executeCommand('workbench.action.chat.open', {
             query: `@workspace ${finalPrompt}`
         });
 
-        // Post-handoff notification with return option
+        // Quiet notification - user can return to AutoForge if needed
         vscode.window.showInformationMessage(
-            'AutoForge: Context sent to @workspace. Return to AutoForge when ready.',
-            'Back to AutoForge',
-            'Save Pattern'
+            'KB context added to @workspace',
+            'Continue with AutoForge'
         ).then(async choice => {
-            if (choice === 'Back to AutoForge') {
+            if (choice === 'Continue with AutoForge') {
                 await vscode.commands.executeCommand('workbench.action.chat.open', {
-                    query: `@autoforge Continue from where we left off. I was working on: ${userIntent}`
-                });
-            } else if (choice === 'Save Pattern') {
-                await vscode.commands.executeCommand('workbench.action.chat.open', {
-                    query: `@autoforge /scan`
+                    query: `@autoforge Continue from where we left off`
                 });
             }
         });
