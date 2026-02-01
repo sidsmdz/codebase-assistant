@@ -235,6 +235,40 @@ export class KnowledgeBaseManager {
         this.db.run(`CREATE INDEX IF NOT EXISTS idx_component_type ON feature_components(component_type);`);
         this.db.run(`CREATE INDEX IF NOT EXISTS idx_component_language ON feature_components(language);`);
         this.db.run(`CREATE INDEX IF NOT EXISTS idx_feature_name ON features(name);`);
+
+        // Run migrations for existing databases
+        this.runMigrations();
+    }
+
+    private runMigrations(): void {
+        console.log('Running database migrations...');
+        
+        // Migration 1: Add module columns to features table (for multi-module support)
+        try {
+            // Check if module column exists
+            const result = this.db.exec("PRAGMA table_info(features)");
+            if (result.length > 0) {
+                const columns = result[0].values.map(row => row[1]); // column name is at index 1
+                
+                if (!columns.includes('module')) {
+                    console.log('Adding module column to features table...');
+                    this.db.run('ALTER TABLE features ADD COLUMN module TEXT');
+                }
+                
+                if (!columns.includes('module_path')) {
+                    console.log('Adding module_path column to features table...');
+                    this.db.run('ALTER TABLE features ADD COLUMN module_path TEXT');
+                }
+                
+                if (!columns.includes('cross_module_deps_json')) {
+                    console.log('Adding cross_module_deps_json column to features table...');
+                    this.db.run('ALTER TABLE features ADD COLUMN cross_module_deps_json TEXT');
+                }
+            }
+            console.log('✅ Database migrations completed');
+        } catch (error) {
+            console.error('Migration failed:', error);
+        }
     }
 
     private async saveDatabase(): Promise<void> {
