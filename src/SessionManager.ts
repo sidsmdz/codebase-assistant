@@ -18,6 +18,14 @@ export interface Session {
             features: number;
             components: number;
         };
+        lastGeneratedCode?: {
+            code: string;
+            language: string;
+            timestamp: string;
+            source: 'workspace' | 'copilot';
+        };
+        lastMentionedFiles?: string[];
+        pendingDisambiguation?: any[];
     };
 }
 
@@ -340,6 +348,78 @@ export class SessionManager {
         } catch (err) {
             console.error('Failed to import session:', err);
             return null;
+        }
+    }
+
+    /**
+     * Store generated code from @workspace for later analysis
+     */
+    async storeGeneratedCode(code: string, language: string, source: 'workspace' | 'copilot' = 'workspace'): Promise<void> {
+        if (this.currentSession) {
+            this.currentSession.metadata.lastGeneratedCode = {
+                code,
+                language,
+                timestamp: new Date().toISOString(),
+                source
+            };
+            await this.saveSession(this.currentSession);
+        }
+    }
+
+    /**
+     * Get last generated code for analysis
+     */
+    getLastGeneratedCode(): { code: string; language: string; timestamp: string; source: string } | null {
+        return this.currentSession?.metadata.lastGeneratedCode || null;
+    }
+
+    /**
+     * Track files mentioned in conversation
+     */
+    async addMentionedFile(filePath: string): Promise<void> {
+        if (this.currentSession) {
+            if (!this.currentSession.metadata.lastMentionedFiles) {
+                this.currentSession.metadata.lastMentionedFiles = [];
+            }
+            // Add to front, keep last 10
+            this.currentSession.metadata.lastMentionedFiles.unshift(filePath);
+            this.currentSession.metadata.lastMentionedFiles = this.currentSession.metadata.lastMentionedFiles.slice(0, 10);
+            await this.saveSession(this.currentSession);
+        }
+    }
+
+    /**
+     * Get last mentioned file path
+     */
+    getLastMentionedFile(): string | null {
+        const files = this.currentSession?.metadata.lastMentionedFiles;
+        return files && files.length > 0 ? files[0] : null;
+    }
+
+    /**
+     * Store pending disambiguation for next turn
+     */
+    async storePendingDisambiguation(options: any[]): Promise<void> {
+        if (this.currentSession) {
+            this.currentSession.metadata.pendingDisambiguation = options;
+            await this.saveSession(this.currentSession);
+        }
+    }
+
+    /**
+     * Get pending disambiguation
+     */
+    getPendingDisambiguation(): any[] | null {
+        return this.currentSession?.metadata.pendingDisambiguation || null;
+    }
+
+    /**
+     * Clear pending disambiguation after use
+     */
+    async clearPendingDisambiguation(): Promise<void> {
+        if (this.currentSession) {
+            this.currentSession.metadata.pendingDisambiguation = undefined;
+            await this.saveSession(this.currentSession);
         }
     }
 }

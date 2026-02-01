@@ -1,7 +1,7 @@
 import * as vscode from 'vscode';
 import { KnowledgeBaseManager } from './knowledgeBase/KnowledgeBaseManager';
 import { IngestionService } from './ingestionService';
-import { registerChatParticipant } from './chatParticipant';
+import { registerChatParticipant } from './chatParticipant'; // Now uses modular version
 import { KBTreeProvider } from './kbTreeProvider';
 import { SessionManager } from './SessionManager';
 import { SessionTreeProvider } from './sessionTreeProvider';
@@ -11,6 +11,9 @@ let sessionManager: SessionManager;
 
 export async function activate(context: vscode.ExtensionContext) {
     console.log('AutoForge extension activating...');
+
+    // Store extension context globally for access in chat participant
+    (global as any).autoforgeExtensionContext = context;
 
     kbManager = new KnowledgeBaseManager(context);
     await kbManager.initialize();
