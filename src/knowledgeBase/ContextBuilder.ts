@@ -49,6 +49,50 @@ export class ContextBuilder {
     }
 
     /**
+     * Build context with metadata — returns enriched prompt plus summary info
+     * for progress reporting in the chat participant.
+     * @param isExhaustive - If true, includes ALL features instead of top 3
+     */
+    async buildContextWithMetadata(userQuery: string, isExhaustive: boolean = false): Promise<{
+        enrichedPrompt: string;
+        featuresFound: number;
+        featureNames: string[];
+    }> {
+        try {
+            if (!this.kbManager) {
+                return { enrichedPrompt: userQuery, featuresFound: 0, featureNames: [] };
+            }
+
+            // For exhaustive queries, get ALL features
+            const features = isExhaustive 
+                ? await this.kbManager.getAllFeatures()
+                : await this.kbManager.searchFeatures(userQuery, 3);
+            if (features.length > 0) {
+                const enrichedPrompt = await this.buildFeatureContext(userQuery, features);
+                return {
+                    enrichedPrompt,
+                    featuresFound: features.length,
+                    featureNames: features.map(f => f.name)
+                };
+            }
+
+            const patterns = await this.kbManager.searchPatterns(userQuery, 3);
+            if (patterns.length > 0) {
+                return {
+                    enrichedPrompt: this.buildPatternContext(userQuery, patterns),
+                    featuresFound: 0,
+                    featureNames: []
+                };
+            }
+
+            return { enrichedPrompt: userQuery, featuresFound: 0, featureNames: [] };
+        } catch (error) {
+            console.error('Failed to build context with metadata:', error);
+            return { enrichedPrompt: userQuery, featuresFound: 0, featureNames: [] };
+        }
+    }
+
+    /**
      * Build context from features - provides end-to-end flow
      */
     private async buildFeatureContext(userQuery: string, features: Feature[]): Promise<string> {

@@ -1,9 +1,13 @@
 import * as vscode from 'vscode';
-import { ChatViewProvider } from './chatViewProvider';
 import { KnowledgeBaseManager } from './knowledgeBase/KnowledgeBaseManager';
 import { IngestionService } from './ingestionService';
+import { registerChatParticipant } from './chatParticipant';
+import { KBTreeProvider } from './kbTreeProvider';
+import { SessionManager } from './SessionManager';
+import { SessionTreeProvider } from './sessionTreeProvider';
 
 let kbManager: KnowledgeBaseManager;
+let sessionManager: SessionManager;
 
 export async function activate(context: vscode.ExtensionContext) {
     console.log('AutoForge extension activating...');
@@ -11,90 +15,101 @@ export async function activate(context: vscode.ExtensionContext) {
     kbManager = new KnowledgeBaseManager(context);
     await kbManager.initialize();
 
-    const provider = new ChatViewProvider(context.extensionUri, kbManager);
+    sessionManager = new SessionManager(context);
+    await sessionManager.initialize();
 
-    context.subscriptions.push(
-        vscode.window.registerWebviewViewProvider('autoforge.chatViewV2', provider)
-    );
+    // Sidebar tree view for KB browsing
+    const treeProvider = new KBTreeProvider(kbManager);
+    const treeView = vscode.window.createTreeView('autoforge.kbExplorer', {
+        treeDataProvider: treeProvider,
+        showCollapseAll: true
+    });
+    context.subscriptions.push(treeView);
 
-    context.subscriptions.push(
-        vscode.commands.registerCommand('autoforge.openChat', () => {
-            vscode.commands.executeCommand('autoforge.chatViewV2.focus');
-        })
-    );
+    // Sidebar tree view for Sessions
+    const sessionTreeProvider = new SessionTreeProvider(sessionManager);
+    const sessionTreeView = vscode.window.createTreeView('autoforge.sessionsExplorer', {
+        treeDataProvider: sessionTreeProvider,
+        showCollapseAll: true
+    });
+    context.subscriptions.push(sessionTreeView);
 
+    // Chat participant (@autoforge in Copilot Chat)
+    const participant = registerChatParticipant(context, kbManager, sessionManager, () => {
+        treeProvider.refresh();
+        sessionTreeProvider.refresh();
+    });
+    context.subscriptions.push(participant);
+    
+    // Store participant reference for command access
+    context.workspaceState.update('autoforge.participant', participant);
+
+    // Command: Index workspace
     context.subscriptions.push(
         vscode.commands.registerCommand('autoforge.ingestWorkspace', async () => {
             const ingestService = new IngestionService(kbManager);
             await ingestService.runIngestion();
+            treeProvider.refresh();
         })
     );
 
+    // Command: Show KB stats (output channel)
     context.subscriptions.push(
         vscode.commands.registerCommand('autoforge.showKBStats', async () => {
             const detailedStats = await kbManager.getDetailedStats();
 
-            // Build detailed stats message
-            let message = `📊 AutoForge Knowledge Base Statistics\n\n`;
+            let message = `AutoForge Knowledge Base Statistics\n\n`;
+            message += `Features: ${detailedStats.totalFeatures}\n`;
+            message += `Components: ${detailedStats.totalComponents}\n`;
+            message += `Data Flows: ${detailedStats.totalDataFlows}\n`;
+            message += `Indexed Files: ${detailedStats.indexedFiles}\n`;
+            message += `Indexed Terms: ${detailedStats.totalTerms}\n`;
 
-            // Features & Components (primary data from workspace scan)
-            message += `🧩 Features: ${detailedStats.totalFeatures}\n`;
-            message += `🔧 Components: ${detailedStats.totalComponents}\n`;
-            message += `🔀 Data Flows: ${detailedStats.totalDataFlows}\n`;
-            message += `📁 Indexed Files: ${detailedStats.indexedFiles}\n`;
-            message += `📝 Indexed Terms: ${detailedStats.totalTerms}\n`;
-
-            // Show patterns/AST only if they exist
             if (detailedStats.totalPatterns > 0) {
-                message += `📦 Saved Patterns: ${detailedStats.totalPatterns}\n`;
+                message += `Saved Patterns: ${detailedStats.totalPatterns}\n`;
             }
             if (detailedStats.totalASTNodes > 0) {
-                message += `🌳 AST Nodes: ${detailedStats.totalASTNodes}\n`;
+                message += `AST Nodes: ${detailedStats.totalASTNodes}\n`;
             }
             message += `\n`;
 
-            // Features by language
             if (Object.keys(detailedStats.featuresByLanguage).length > 0) {
-                message += `💻 Features by Language:\n`;
+                message += `Features by Language:\n`;
                 Object.entries(detailedStats.featuresByLanguage)
                     .sort((a, b) => b[1] - a[1])
                     .forEach(([lang, count]) => {
-                        message += `   • ${lang}: ${count}\n`;
+                        message += `   ${lang}: ${count}\n`;
                     });
                 message += `\n`;
             }
 
-            // Components by type
             if (Object.keys(detailedStats.componentsByType).length > 0) {
-                message += `🏗️  Components by Type:\n`;
+                message += `Components by Type:\n`;
                 Object.entries(detailedStats.componentsByType)
                     .sort((a, b) => b[1] - a[1])
                     .forEach(([type, count]) => {
-                        message += `   • ${type}: ${count}\n`;
+                        message += `   ${type}: ${count}\n`;
                     });
                 message += `\n`;
             }
 
-            // Features by framework
             if (Object.keys(detailedStats.featuresByFramework).length > 0) {
-                message += `🛠️  Frameworks Detected:\n`;
+                message += `Frameworks Detected:\n`;
                 Object.entries(detailedStats.featuresByFramework)
                     .sort((a, b) => b[1] - a[1])
                     .forEach(([fw, count]) => {
-                        message += `   • ${fw}: ${count} features\n`;
+                        message += `   ${fw}: ${count} features\n`;
                     });
                 message += `\n`;
             }
 
-            // Top tags
             if (detailedStats.topTags.length > 0) {
-                message += `🏷️  Top Tags:\n`;
+                message += `Top Tags:\n`;
                 detailedStats.topTags.forEach(({ tag, count }) => {
-                    message += `   • ${tag}: ${count}\n`;
+                    message += `   ${tag}: ${count}\n`;
                 });
             }
 
-            // Create output channel to show stats
             const outputChannel = vscode.window.createOutputChannel('AutoForge Knowledge Base');
             outputChannel.clear();
             outputChannel.appendLine(message);
@@ -102,10 +117,11 @@ export async function activate(context: vscode.ExtensionContext) {
         })
     );
 
+    // Command: Reset knowledge base
     context.subscriptions.push(
         vscode.commands.registerCommand('autoforge.resetKnowledgeBase', async () => {
             const confirm = await vscode.window.showWarningMessage(
-                '⚠️ This will delete ALL patterns and indexed data from the knowledge base. This cannot be undone!',
+                'This will delete ALL patterns and indexed data from the knowledge base. This cannot be undone!',
                 { modal: true },
                 'Reset Knowledge Base',
                 'Cancel'
@@ -113,55 +129,34 @@ export async function activate(context: vscode.ExtensionContext) {
 
             if (confirm === 'Reset Knowledge Base') {
                 await kbManager.clearAllData();
+                treeProvider.refresh();
 
-                // Verify reset by getting stats
                 const stats = await kbManager.getStats();
-                const message = stats.patternCount === 0 && stats.indexedFilesCount === 0
-                    ? '✅ Knowledge base has been reset successfully. You can now re-index your workspace.'
-                    : `⚠️ Reset completed but some data may remain: ${stats.patternCount} patterns, ${stats.indexedFilesCount} indexed files. Please try again or restart VS Code.`;
+                const msg = stats.patternCount === 0 && stats.indexedFilesCount === 0
+                    ? 'Knowledge base has been reset successfully. You can now re-index your workspace.'
+                    : `Reset completed but some data may remain: ${stats.patternCount} patterns, ${stats.indexedFilesCount} indexed files. Please try again or restart VS Code.`;
 
-                vscode.window.showInformationMessage(message);
+                vscode.window.showInformationMessage(msg);
             }
         })
     );
 
+    // Command: List patterns (quick pick feature browser)
     context.subscriptions.push(
         vscode.commands.registerCommand('autoforge.listPatterns', async () => {
-            // Show features instead of individual patterns
-            console.log('Browse KB: Fetching features...');
-
-            let features;
-            try {
-                features = await kbManager.getAllFeatures();
-                console.log(`Browse KB: Got ${features.length} features`);
-            } catch (error) {
-                console.error('Browse KB error:', error);
-                vscode.window.showErrorMessage(`Error fetching features: ${error}`);
-                return;
-            }
+            const features = await kbManager.getAllFeatures();
 
             if (features.length === 0) {
-                // Try to get feature stats to debug
-                const stats = await kbManager.getFeatureStats();
-                console.log('Browse KB: Feature stats:', JSON.stringify(stats));
                 vscode.window.showInformationMessage('No features found. Run "AutoForge: Index Workspace" to analyze your codebase!');
                 return;
             }
 
-            // Build feature items with rich details
-            const items = features.map(f => {
-                const isFullStack = f.languages.includes('java') && f.languages.includes('typescript');
-                const stackIcon = isFullStack ? '$(globe)' : f.languages.includes('java') ? '$(server)' : '$(browser)';
-                const componentCount = f.components.length;
-                const frameworks = f.frameworks.length > 0 ? f.frameworks.join(', ') : 'none';
-
-                return {
-                    label: `${stackIcon} ${f.name}`,
-                    description: `${f.languages.join(' + ')} • ${componentCount} components • ${frameworks}`,
-                    detail: `${f.description}`,
-                    feature: f
-                };
-            });
+            const items = features.map(f => ({
+                label: f.name,
+                description: `${f.languages.join(' + ')} · ${f.components.length} components`,
+                detail: f.description,
+                feature: f
+            }));
 
             const selected = await vscode.window.showQuickPick(items, {
                 placeHolder: `Browse ${features.length} features in your knowledge base`,
@@ -170,129 +165,500 @@ export async function activate(context: vscode.ExtensionContext) {
             });
 
             if (selected) {
-                const action = await vscode.window.showQuickPick([
-                    { label: '$(list-tree) View Components', action: 'components' },
-                    { label: '$(info) Show Feature Details', action: 'details' },
-                    { label: '$(git-merge) View Data Flow', action: 'flow' }
-                ], {
-                    placeHolder: `What do you want to see for "${selected.feature.name}"?`
+                const components = await kbManager.getComponentsForFeature(selected.feature.id);
+                if (components.length === 0) { return; }
+
+                const componentItems = components.map(c => {
+                    const isEntry = selected.feature.entryPoints.includes(c.id);
+                    return {
+                        label: `${c.name}${isEntry ? ' [Entry Point]' : ''}`,
+                        description: `${c.type} · ${c.language}`,
+                        detail: `${vscode.workspace.asRelativePath(c.filePath)}:${c.startLine}`,
+                        component: c
+                    };
                 });
 
-                if (action?.action === 'components') {
-                    // Get components for this feature
-                    const components = await kbManager.getComponentsForFeature(selected.feature.id);
+                const selectedComp = await vscode.window.showQuickPick(componentItems, {
+                    placeHolder: `${components.length} components in "${selected.feature.name}"`
+                });
 
-                    if (components.length === 0) {
-                        vscode.window.showInformationMessage('No components found for this feature.');
-                        return;
-                    }
-
-                    const componentItems = components.map(c => {
-                        const isEntryPoint = selected.feature.entryPoints.includes(c.id);
-                        const icon = isEntryPoint ? '$(rocket)' : c.type === 'service' ? '$(server)' : c.type === 'controller' ? '$(broadcast)' : '$(file-code)';
-                        const relPath = vscode.workspace.asRelativePath(c.filePath);
-
-                        return {
-                            label: `${icon} ${c.name}${isEntryPoint ? ' [Entry Point]' : ''}`,
-                            description: `${c.type} • ${c.language}`,
-                            detail: `${relPath}:${c.startLine}`,
-                            component: c
-                        };
-                    });
-
-                    const selectedComponent = await vscode.window.showQuickPick(componentItems, {
-                        placeHolder: `${components.length} components in "${selected.feature.name}"`
-                    });
-
-                    if (selectedComponent) {
-                        // Open the file at the component's line
-                        const doc = await vscode.workspace.openTextDocument(selectedComponent.component.filePath);
-                        const editor = await vscode.window.showTextDocument(doc);
-                        const line = selectedComponent.component.startLine - 1;
-                        editor.revealRange(new vscode.Range(line, 0, line, 0), vscode.TextEditorRevealType.InCenter);
-                        editor.selection = new vscode.Selection(line, 0, line, 0);
-                    }
-                } else if (action?.action === 'details') {
-                    // Show detailed feature information
-                    const outputChannel = vscode.window.createOutputChannel('AutoForge Feature Details');
-                    outputChannel.clear();
-                    outputChannel.appendLine(`🎯 Feature: ${selected.feature.name}\n`);
-                    outputChannel.appendLine('═'.repeat(60));
-                    outputChannel.appendLine(`ID: ${selected.feature.id}`);
-                    outputChannel.appendLine(`Description: ${selected.feature.description}`);
-                    outputChannel.appendLine(`Languages: ${selected.feature.languages.join(', ')}`);
-                    outputChannel.appendLine(`Frameworks: ${selected.feature.frameworks.join(', ') || 'none'}`);
-                    outputChannel.appendLine(`Tags: ${selected.feature.tags.slice(0, 10).join(', ')}`);
-
-                    outputChannel.appendLine(`\n📦 Components (${selected.feature.components.length}):`);
-                    outputChannel.appendLine('─'.repeat(60));
-
-                    const components = await kbManager.getComponentsForFeature(selected.feature.id);
-                    for (const comp of components) {
-                        const isEntry = selected.feature.entryPoints.includes(comp.id);
-                        const entryLabel = isEntry ? ' [ENTRY POINT]' : '';
-                        outputChannel.appendLine(`\n  ${comp.type.toUpperCase()}: ${comp.name}${entryLabel}`);
-                        outputChannel.appendLine(`    File: ${vscode.workspace.asRelativePath(comp.filePath)}:${comp.startLine}`);
-                        outputChannel.appendLine(`    Language: ${comp.language}`);
-                        if (comp.annotations.length > 0) {
-                            const anns = comp.annotations.filter(a => !a.startsWith('@param')).slice(0, 5);
-                            if (anns.length > 0) {
-                                outputChannel.appendLine(`    Annotations: ${anns.join(', ')}`);
-                            }
-                        }
-                        if (comp.dependencies.length > 0) {
-                            const deps = comp.dependencies.filter(d => d.endsWith('Service') || d.endsWith('Repository')).slice(0, 5);
-                            if (deps.length > 0) {
-                                outputChannel.appendLine(`    Dependencies: ${deps.join(', ')}`);
-                            }
-                        }
-                    }
-
-                    if (selected.feature.flow.length > 0) {
-                        outputChannel.appendLine(`\n🔄 Data Flow:`);
-                        outputChannel.appendLine('─'.repeat(60));
-                        for (const flow of selected.feature.flow) {
-                            outputChannel.appendLine(`  ${flow.description || `${flow.from} -> ${flow.to}`}`);
-                        }
-                    }
-
-                    outputChannel.show();
-                } else if (action?.action === 'flow') {
-                    // Show data flow visualization
-                    const outputChannel = vscode.window.createOutputChannel('AutoForge Data Flow');
-                    outputChannel.clear();
-                    outputChannel.appendLine(`🔄 Data Flow: ${selected.feature.name}\n`);
-                    outputChannel.appendLine('═'.repeat(60));
-
-                    if (selected.feature.flow.length === 0) {
-                        outputChannel.appendLine('No data flow connections found for this feature.');
-                    } else {
-                        const components = await kbManager.getComponentsForFeature(selected.feature.id);
-                        const compMap = new Map(components.map(c => [c.id, c]));
-
-                        outputChannel.appendLine(`\nComponent Connections:\n`);
-                        for (const flow of selected.feature.flow) {
-                            const fromComp = compMap.get(flow.from);
-                            const toComp = compMap.get(flow.to);
-                            if (fromComp && toComp) {
-                                const fromLang = fromComp.language === 'java' ? '[Java]' : '[TS]';
-                                const toLang = toComp.language === 'java' ? '[Java]' : '[TS]';
-                                outputChannel.appendLine(`  ${fromLang} ${fromComp.name} (${fromComp.type})`);
-                                outputChannel.appendLine(`       │`);
-                                outputChannel.appendLine(`       └──[${flow.type}]──>`);
-                                outputChannel.appendLine(`              │`);
-                                outputChannel.appendLine(`  ${toLang} ${toComp.name} (${toComp.type})\n`);
-                            }
-                        }
-                    }
-
-                    outputChannel.show();
+                if (selectedComp) {
+                    const doc = await vscode.workspace.openTextDocument(selectedComp.component.filePath);
+                    const editor = await vscode.window.showTextDocument(doc);
+                    const line = selectedComp.component.startLine - 1;
+                    editor.revealRange(new vscode.Range(line, 0, line, 0), vscode.TextEditorRevealType.InCenter);
+                    editor.selection = new vscode.Selection(line, 0, line, 0);
                 }
             }
         })
     );
 
+    // ──────────────────────────────────────────────────────────────
+    // Session Management Commands
+    // ──────────────────────────────────────────────────────────────
+
+    // Command: Switch to session (from tree view click)
+    context.subscriptions.push(
+        vscode.commands.registerCommand('autoforge.session.switch', async (sessionId: string) => {
+            const session = await sessionManager.switchSession(sessionId);
+            if (session) {
+                sessionTreeProvider.refresh();
+                vscode.window.showInformationMessage(`Switched to session: ${session.name}`);
+            }
+        })
+    );
+
+    // Command: Rename session (from context menu)
+    context.subscriptions.push(
+        vscode.commands.registerCommand('autoforge.session.rename', async (item: any) => {
+            const sessionId = item?.session?.id;
+            if (!sessionId) {
+                return;
+            }
+
+            const session = sessionManager.getSession(sessionId);
+            if (!session) {
+                return;
+            }
+
+            const newName = await vscode.window.showInputBox({
+                prompt: 'Enter new session name',
+                value: session.name,
+                validateInput: (value) => {
+                    return value.trim() ? null : 'Name cannot be empty';
+                }
+            });
+
+            if (newName && newName !== session.name) {
+                await sessionManager.renameSession(newName, sessionId);
+                sessionTreeProvider.refresh();
+                vscode.window.showInformationMessage(`Session renamed to: ${newName}`);
+            }
+        })
+    );
+
+    // Command: Delete session (from context menu)
+    context.subscriptions.push(
+        vscode.commands.registerCommand('autoforge.session.delete', async (item: any) => {
+            const sessionId = item?.session?.id;
+            if (!sessionId) {
+                return;
+            }
+
+            const session = sessionManager.getSession(sessionId);
+            if (!session) {
+                return;
+            }
+
+            const confirm = await vscode.window.showWarningMessage(
+                `Delete session "${session.name}"? This cannot be undone.`,
+                { modal: true },
+                'Delete'
+            );
+
+            if (confirm === 'Delete') {
+                await sessionManager.deleteSession(sessionId);
+                sessionTreeProvider.refresh();
+                vscode.window.showInformationMessage(`Session "${session.name}" deleted`);
+            }
+        })
+    );
+
+    // Command: Export session (from context menu)
+    context.subscriptions.push(
+        vscode.commands.registerCommand('autoforge.session.export', async (item: any) => {
+            const sessionId = item?.session?.id;
+            if (!sessionId) {
+                return;
+            }
+
+            const sessionData = await sessionManager.exportSession(sessionId);
+            if (!sessionData) {
+                vscode.window.showErrorMessage('Failed to export session');
+                return;
+            }
+
+            const session = sessionManager.getSession(sessionId);
+            const fileName = `${session?.name || 'session'}.json`.replace(/[^a-z0-9-]/gi, '_');
+
+            const uri = await vscode.window.showSaveDialog({
+                defaultUri: vscode.Uri.file(fileName),
+                filters: { 'JSON': ['json'] }
+            });
+
+            if (uri) {
+                await vscode.workspace.fs.writeFile(uri, Buffer.from(sessionData, 'utf-8'));
+                vscode.window.showInformationMessage(`Session exported to ${uri.fsPath}`);
+            }
+        })
+    );
+
+    // Command: Import session
+    context.subscriptions.push(
+        vscode.commands.registerCommand('autoforge.session.import', async () => {
+            const uri = await vscode.window.showOpenDialog({
+                canSelectFiles: true,
+                canSelectFolders: false,
+                canSelectMany: false,
+                filters: { 'JSON': ['json'] },
+                title: 'Import AutoForge Session'
+            });
+
+            if (uri && uri[0]) {
+                const content = await vscode.workspace.fs.readFile(uri[0]);
+                const sessionData = Buffer.from(content).toString('utf-8');
+                
+                const session = await sessionManager.importSession(sessionData);
+                if (session) {
+                    sessionTreeProvider.refresh();
+                    vscode.window.showInformationMessage(`Session imported: ${session.name}`);
+                } else {
+                    vscode.window.showErrorMessage('Failed to import session');
+                }
+            }
+        })
+    );
+
+    // Command: Refresh sessions view
+    context.subscriptions.push(
+        vscode.commands.registerCommand('autoforge.session.refresh', () => {
+            sessionTreeProvider.refresh();
+        })
+    );
+
+    // ──────────────────────────────────────────────────────────────
+    // Follow-up Button Commands
+    // ──────────────────────────────────────────────────────────────
+
+    // Command: Generate Tests
+    context.subscriptions.push(
+        vscode.commands.registerCommand('autoforge.action.generateTests', async (context: any) => {
+            await openCopilotWithContext(context, 'Generate comprehensive unit tests for this code', {
+                includeTestFramework: true,
+                includeEdgeCases: true,
+                includeMocks: true
+            });
+        })
+    );
+
+    // Command: Refactor Code
+    context.subscriptions.push(
+        vscode.commands.registerCommand('autoforge.action.refactor', async (context: any) => {
+            await openCopilotWithContext(context, 'Refactor this code to improve quality', {
+                considerPatterns: true,
+                improveReadability: true,
+                reduceCoupling: true
+            });
+        })
+    );
+
+    // Command: Add Feature
+    context.subscriptions.push(
+        vscode.commands.registerCommand('autoforge.action.addFeature', async (context: any) => {
+            const featureName = await vscode.window.showInputBox({
+                prompt: 'What feature would you like to add?',
+                placeHolder: 'e.g., Add validation, Add logging, Add caching...',
+                validateInput: (value) => value.trim() ? null : 'Please describe the feature'
+            });
+
+            if (featureName) {
+                await openCopilotWithContext(context, `Add the following feature: ${featureName}`, {
+                    maintainCompatibility: true,
+                    addTests: true
+                });
+            }
+        })
+    );
+
+    // Command: Edit with Copilot
+    context.subscriptions.push(
+        vscode.commands.registerCommand('autoforge.edit.withCopilot', async (context: any) => {
+            // Open the file and select the code range
+            if (context.filePath) {
+                try {
+                    const doc = await vscode.workspace.openTextDocument(context.filePath);
+                    const editor = await vscode.window.showTextDocument(doc);
+                    
+                    // If we have the analysis with range info, select that range
+                    if (context.analysis?.range) {
+                        const range = context.analysis.range;
+                        editor.selection = new vscode.Selection(
+                            range.start.line,
+                            range.start.character,
+                            range.end.line,
+                            range.end.character
+                        );
+                        editor.revealRange(range, vscode.TextEditorRevealType.InCenter);
+                    }
+                    
+                    // Build context-aware prompt for Copilot
+                    let prompt = `Improve and refactor this code`;
+                    
+                    if (context.type === 'explain') {
+                        prompt = `Based on the previous explanation, suggest improvements to this code`;
+                    } else if (context.type === 'analyze') {
+                        prompt = `Based on the dependency analysis, refactor this code to improve maintainability`;
+                    } else if (context.type === 'trace') {
+                        prompt = `Based on the dependency trace, suggest ways to reduce coupling in this code`;
+                    } else if (context.type === 'impact') {
+                        prompt = `Based on the impact analysis, suggest safer refactoring approaches`;
+                    }
+                    
+                    // Add KB context if available
+                    if (context.analysis?.relatedFeatures && context.analysis.relatedFeatures.length > 0) {
+                        const features = context.analysis.relatedFeatures.map((f: any) => f.name).join(', ');
+                        prompt += `\n\nThis code is part of: ${features}`;
+                    }
+                    
+                    // Open Copilot chat with the context
+                    await vscode.commands.executeCommand('workbench.action.chat.open', {
+                        query: `@workspace ${prompt}\n\nConsider:\n- Code quality and readability\n- Performance implications\n- Testing requirements\n- Breaking change risks`
+                    });
+                    
+                } catch (err) {
+                    vscode.window.showErrorMessage(`Failed to open file: ${err instanceof Error ? err.message : String(err)}`);
+                }
+            }
+        })
+    );
+
+    // Command: Follow-up - Tell Me More
+    context.subscriptions.push(
+        vscode.commands.registerCommand('autoforge.followup.more', async (context: any) => {
+            // Trigger a new chat request with enhanced prompt
+            await vscode.commands.executeCommand('workbench.action.chat.open', {
+                query: `@autoforge Based on the previous ${context.type} analysis, provide a more detailed explanation. Include implementation details, edge cases, and technical considerations.\n\n${context.code ? `Code:\n\`\`\`\n${context.code.substring(0, 500)}\n\`\`\`` : ''}`
+            });
+        })
+    );
+
+    // Command: Follow-up - Give Examples
+    context.subscriptions.push(
+        vscode.commands.registerCommand('autoforge.followup.examples', async (context: any) => {
+            await vscode.commands.executeCommand('workbench.action.chat.open', {
+                query: `@autoforge Based on the previous ${context.type} analysis, provide concrete code examples demonstrating:\n1. How to use this code\n2. Common usage patterns\n3. Integration examples with related components\n\n${context.code ? `Code:\n\`\`\`\n${context.code.substring(0, 500)}\n\`\`\`` : ''}`
+            });
+        })
+    );
+
+    // Command: Follow-up - Explain Architecture
+    context.subscriptions.push(
+        vscode.commands.registerCommand('autoforge.followup.architecture', async (context: any) => {
+            await vscode.commands.executeCommand('workbench.action.chat.open', {
+                query: `@autoforge Based on the previous ${context.type} analysis, explain the architectural design:\n1. How does this fit into the overall system architecture?\n2. What design patterns are used?\n3. What are the key architectural decisions?\n\n${context.code ? `Code:\n\`\`\`\n${context.code.substring(0, 500)}\n\`\`\`` : ''}`
+            });
+        })
+    );
+
+    // Command: Follow-up - Show Best Practices
+    context.subscriptions.push(
+        vscode.commands.registerCommand('autoforge.followup.practices', async (context: any) => {
+            await vscode.commands.executeCommand('workbench.action.chat.open', {
+                query: `@autoforge Based on the previous ${context.type} analysis, suggest best practices:\n1. Code quality improvements\n2. Testing strategies\n3. Maintainability recommendations\n4. Performance considerations\n\n${context.code ? `Code:\n\`\`\`\n${context.code.substring(0, 500)}\n\`\`\`` : ''}`
+            });
+        })
+    );
+
+    // Command: Handoff to Copilot with KB Context
+    context.subscriptions.push(
+        vscode.commands.registerCommand('autoforge.handoffToCopilot', async () => {
+            // Get last analysis context from participant
+            const participant = context.workspaceState.get('autoforge.participant') as any;
+            const lastMetadata = participant?.getLastMetadata?.();
+            const analysisCtx = lastMetadata?.analysisContext;
+            
+            // Prompt user for their specific intent
+            const userIntent = await vscode.window.showInputBox({
+                prompt: 'What would you like Copilot to generate or implement?',
+                placeHolder: 'e.g., Add PostgreSQL database connection, Create REST API endpoint, Implement authentication...',
+                validateInput: (value) => value.trim() ? null : 'Please describe what you want to generate'
+            });
+
+            if (!userIntent) {
+                return; // User cancelled
+            }
+
+            // Build context from AutoForge's analysis
+            let kbContext = '';
+            
+            // Add KB insights if available
+            if (analysisCtx?.features && analysisCtx.features.length > 0) {
+                kbContext += `\n\n## Architecture Context\nRelated features: ${analysisCtx.features.join(', ')}`;
+            }
+            
+            if (analysisCtx?.files && analysisCtx.files.length > 0) {
+                kbContext += `\n\n## Relevant Files\n`;
+                for (const file of analysisCtx.files.slice(0, 5)) {
+                    kbContext += `- ${file}\n`;
+                }
+            }
+            
+            if (analysisCtx?.selections && analysisCtx.selections.length > 0) {
+                kbContext += `\n\n## Code Context\n`;
+                for (const sel of analysisCtx.selections) {
+                    kbContext += `From ${sel.uri} (lines ${sel.range.start}-${sel.range.end}):\n\`\`\`\n${sel.content}\n\`\`\`\n\n`;
+                }
+            }
+
+            // Get recent session context from AutoForge
+            const workspaceFolders = vscode.workspace.workspaceFolders;
+            if (workspaceFolders) {
+                const session = await sessionManager.getCurrentSession(workspaceFolders[0].uri.fsPath);
+                if (session && session.conversationHistory.length > 0) {
+                    const recentTurns = session.conversationHistory.slice(-4); // Last 4 turns (2 exchanges)
+                    kbContext += `\n\n## Recent Context from @autoforge\n`;
+                    for (const turn of recentTurns) {
+                        const preview = turn.content.length > 150 ? turn.content.substring(0, 150) + '...' : turn.content;
+                        kbContext += `- ${turn.role}: ${preview}\n`;
+                    }
+                }
+            }
+
+            // Open @workspace in the same chat window with enriched context
+            await vscode.commands.executeCommand('workbench.action.chat.open', {
+                query: `@workspace ${userIntent}${kbContext}\n\nPlease implement this following best practices for the existing codebase architecture.`
+            });
+        })
+    );
+
+    // ──────────────────────────────────────────────────────────────
+    // Return from @workspace Command
+    // ──────────────────────────────────────────────────────────────
+
+    // Command: Return to AutoForge from @workspace with session context
+    context.subscriptions.push(
+        vscode.commands.registerCommand('autoforge.returnFromWorkspace', async () => {
+            // Build a context-aware return prompt from session history
+            let returnPrompt = 'Continue from where we left off.';
+
+            const workspaceFolders = vscode.workspace.workspaceFolders;
+            if (workspaceFolders) {
+                try {
+                    const session = await sessionManager.getCurrentSession(workspaceFolders[0].uri.fsPath);
+                    if (session && session.conversationHistory.length > 0) {
+                        const lastUserTurn = [...session.conversationHistory]
+                            .reverse()
+                            .find(t => t.role === 'user');
+                        if (lastUserTurn) {
+                            returnPrompt = `Continue from where we left off. My last request was: ${lastUserTurn.content.substring(0, 200)}`;
+                        }
+                    }
+                } catch {
+                    // Use default prompt
+                }
+            }
+
+            await vscode.commands.executeCommand('workbench.action.chat.open', {
+                query: `@autoforge ${returnPrompt}`
+            });
+        })
+    );
+
     console.log('AutoForge activated successfully');
+}
+
+// ─── Helper: Open Copilot with Context ─────────────────────────────
+
+/**
+ * Opens Copilot Chat with rich context from AutoForge analysis
+ */
+async function openCopilotWithContext(
+    context: any,
+    userRequest: string,
+    options: {
+        includeTestFramework?: boolean;
+        includeEdgeCases?: boolean;
+        includeMocks?: boolean;
+        considerPatterns?: boolean;
+        improveReadability?: boolean;
+        reduceCoupling?: boolean;
+        maintainCompatibility?: boolean;
+        addTests?: boolean;
+    } = {}
+): Promise<void> {
+    // Open file and select code if available
+    if (context.filePath) {
+        try {
+            const doc = await vscode.workspace.openTextDocument(context.filePath);
+            const editor = await vscode.window.showTextDocument(doc);
+            
+            if (context.analysis?.range) {
+                const range = context.analysis.range;
+                editor.selection = new vscode.Selection(
+                    range.start.line,
+                    range.start.character,
+                    range.end.line,
+                    range.end.character
+                );
+                editor.revealRange(range, vscode.TextEditorRevealType.InCenter);
+            }
+        } catch (err) {
+            console.error('Failed to open file:', err);
+        }
+    }
+
+    // Build comprehensive prompt
+    let prompt = `${userRequest}\n\n`;
+    
+    // Add code context
+    if (context.code) {
+        prompt += `## Code\n\`\`\`\n${context.code.substring(0, 1000)}\n\`\`\`\n\n`;
+    }
+    
+    // Add KB insights
+    if (context.analysis?.relatedFeatures && context.analysis.relatedFeatures.length > 0) {
+        const features = context.analysis.relatedFeatures.map((f: any) => f.name).join(', ');
+        prompt += `## Architecture Context\nThis code is part of: ${features}\n\n`;
+    }
+    
+    if (context.analysis?.imports && context.analysis.imports.length > 0) {
+        prompt += `## Dependencies\n`;
+        for (const imp of context.analysis.imports.slice(0, 5)) {
+            prompt += `- ${imp}\n`;
+        }
+        prompt += `\n`;
+    }
+    
+    // Add options-specific guidance
+    const guidelines: string[] = [];
+    
+    if (options.includeTestFramework) {
+        guidelines.push('Use appropriate testing framework (Jest/JUnit/pytest)');
+    }
+    if (options.includeEdgeCases) {
+        guidelines.push('Include edge cases and error scenarios');
+    }
+    if (options.includeMocks) {
+        guidelines.push('Mock external dependencies appropriately');
+    }
+    if (options.considerPatterns) {
+        guidelines.push('Apply relevant design patterns');
+    }
+    if (options.improveReadability) {
+        guidelines.push('Improve code readability and documentation');
+    }
+    if (options.reduceCoupling) {
+        guidelines.push('Reduce coupling between components');
+    }
+    if (options.maintainCompatibility) {
+        guidelines.push('Maintain backward compatibility');
+    }
+    if (options.addTests) {
+        guidelines.push('Include unit tests for new functionality');
+    }
+    
+    if (guidelines.length > 0) {
+        prompt += `## Guidelines\n`;
+        for (const guideline of guidelines) {
+            prompt += `- ${guideline}\n`;
+        }
+        prompt += `\n`;
+    }
+    
+    // Open Copilot with @workspace for full context
+    await vscode.commands.executeCommand('workbench.action.chat.open', {
+        query: `@workspace ${prompt}`
+    });
 }
 
 export function deactivate() {}

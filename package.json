@@ -1,15 +1,21 @@
 {
   "name": "autoforge",
   "displayName": "AutoForge",
-  "description": "AI code assistant with company knowledge",
-  "version": "0.2.0",
+  "description": "AI code assistant with codebase knowledge base — Copilot Chat participant",
+  "version": "0.3.0",
   "publisher": "your-company",
   "engines": {
-    "vscode": "^1.90.0"
+    "vscode": "^1.93.0"
   },
   "categories": [
     "AI",
+    "Chat",
     "Programming Languages"
+  ],
+  "enabledApiProposals": [
+    "defaultChatParticipant",
+    "chatParticipantPrivate",
+    "chatParticipantAdditions"
   ],
   "main": "./dist/extension.js",
   "extensionDependencies": [
@@ -17,6 +23,65 @@
   ],
   "activationEvents": [],
   "contributes": {
+    "chatParticipants": [
+      {
+        "id": "autoforge.chatParticipant",
+        "fullName": "AutoForge",
+        "name": "autoforge",
+        "description": "AI assistant enriched with your project's knowledge base — features, components, data flows, and patterns.",
+        "isSticky": false,
+        "commands": [
+          {
+            "name": "scan",
+            "description": "Index your workspace into the knowledge base"
+          },
+          {
+            "name": "features",
+            "description": "List all detected features in the knowledge base"
+          },
+          {
+            "name": "stats",
+            "description": "Show knowledge base statistics"
+          },
+          {
+            "name": "explain",
+            "description": "Explain selected code or a specific feature/component"
+          },
+          {
+            "name": "reset",
+            "description": "Reset the knowledge base (deletes all indexed data)"
+          },
+          {
+            "name": "analyze",
+            "description": "Analyze selected code to find dependencies, features, and dataflow"
+          },
+          {
+            "name": "trace",
+            "description": "Trace dependencies from selected code or a component name"
+          },
+          {
+            "name": "impact",
+            "description": "Analyze impact of changing selected code, file, or component"
+          },
+          {
+            "name": "sessions",
+            "description": "List all saved conversation sessions"
+          },
+          {
+            "name": "session",
+            "description": "Switch to or view details of a specific session"
+          },
+          {
+            "name": "ask",
+            "description": "Ask Copilot to do something with KB context (generate tests, refactor, add feature, etc.)"
+          },
+          {
+            "name": "generate",
+            "description": "Generate code with GitHub Copilot using AutoForge knowledge base context"
+          }
+        ]
+      }
+    ],
     "configuration": {
       "title": "AutoForge",
       "properties": {
@@ -66,18 +131,55 @@
     "views": {
       "autoforge": [
         {
-          "type": "webview",
-          "id": "autoforge.chatViewV2",
-          "name": "Chat",
-          "icon": "media/icon.svg"
+          "id": "autoforge.kbExplorer",
+          "name": "Knowledge Base"
+        },
+        {
+          "id": "autoforge.sessionsExplorer",
+          "name": "Sessions"
+        }
+      ]
+    },
+    "menus": {
+      "view/title": [
+        {
+          "command": "autoforge.ingestWorkspace",
+          "when": "view == autoforge.kbExplorer",
+          "group": "navigation"
+        },
+        {
+          "command": "autoforge.resetKnowledgeBase",
+          "when": "view == autoforge.kbExplorer"
+        },
+        {
+          "command": "autoforge.session.refresh",
+          "when": "view == autoforge.sessionsExplorer",
+          "group": "navigation"
+        },
+        {
+          "command": "autoforge.session.import",
+          "when": "view == autoforge.sessionsExplorer"
+        }
+      ],
+      "view/item/context": [
+        {
+          "command": "autoforge.session.rename",
+          "when": "view == autoforge.sessionsExplorer && viewItem == session",
+          "group": "inline"
+        },
+        {
+          "command": "autoforge.session.export",
+          "when": "view == autoforge.sessionsExplorer && viewItem == session",
+          "group": "1_actions"
+        },
+        {
+          "command": "autoforge.session.delete",
+          "when": "view == autoforge.sessionsExplorer && viewItem == session",
+          "group": "2_danger"
         }
       ]
     },
     "commands": [
-      {
-        "command": "autoforge.openChat",
-        "title": "AutoForge: Open Chat"
-      },
       {
         "command": "autoforge.showKBStats",
         "title": "AutoForge: Show Knowledge Base Stats"
@@ -88,11 +190,78 @@
       },
       {
         "command": "autoforge.ingestWorkspace",
-        "title": "AutoForge: Index Workspace"
+        "title": "AutoForge: Index Workspace",
+        "icon": "$(sync)"
       },
       {
         "command": "autoforge.resetKnowledgeBase",
-        "title": "AutoForge: Reset Knowledge Base"
+        "title": "AutoForge: Reset Knowledge Base",
+        "icon": "$(trash)"
+      },
+      {
+        "command": "autoforge.session.switch",
+        "title": "AutoForge: Switch Session"
+      },
+      {
+        "command": "autoforge.session.rename",
+        "title": "AutoForge: Rename Session",
+        "icon": "$(edit)"
+      },
+      {
+        "command": "autoforge.session.delete",
+        "title": "AutoForge: Delete Session",
+        "icon": "$(trash)"
+      },
+      {
+        "command": "autoforge.session.export",
+        "title": "AutoForge: Export Session",
+        "icon": "$(export)"
+      },
+      {
+        "command": "autoforge.session.import",
+        "title": "AutoForge: Import Session",
+        "icon": "$(import)"
+      },
+      {
+        "command": "autoforge.session.refresh",
+        "title": "AutoForge: Refresh Sessions",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "autoforge.action.generateTests",
+        "title": "AutoForge: Generate Tests"
+      },
+      {
+        "command": "autoforge.action.refactor",
+        "title": "AutoForge: Refactor Code"
+      },
+      {
+        "command": "autoforge.action.addFeature",
+        "title": "AutoForge: Add Feature"
+      },
+      {
+        "command": "autoforge.edit.withCopilot",
+        "title": "AutoForge: Edit with Copilot"
+      },
+      {
+        "command": "autoforge.followup.more",
+        "title": "AutoForge: Tell Me More"
+      },
+      {
+        "command": "autoforge.followup.examples",
+        "title": "AutoForge: Give Examples"
+      },
+      {
+        "command": "autoforge.followup.architecture",
+        "title": "AutoForge: Explain Architecture"
+      },
+      {
+        "command": "autoforge.followup.practices",
+        "title": "AutoForge: Show Best Practices"
+      },
+      {
+        "command": "autoforge.returnFromWorkspace",
+        "title": "AutoForge: Return from Workspace"
       }
     ]
   },
@@ -115,13 +284,14 @@
     "@types/jest": "^30.0.0",
     "@types/node": "^20.10.0",
     "@types/sql.js": "^1.4.9",
-    "@types/vscode": "^1.90.0",
+    "@types/vscode": "^1.93.0",
     "@typescript-eslint/eslint-plugin": "^8.46.2",
     "@typescript-eslint/parser": "^8.46.2",
     "@vscode/vsce": "^2.22.0",
     "esbuild": "^0.25.11",
     "eslint": "^8.56.0",
     "jest": "^30.2.0",
+    "npm-run-all": "^4.1.5",
     "ts-jest": "^29.4.6",
     "typescript": "^5.3.3"
   },
