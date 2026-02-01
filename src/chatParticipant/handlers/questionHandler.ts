@@ -35,6 +35,21 @@ export async function handleQuestion(
         await handleContinueRequest(session, sessionManager, stream);
         return { hasCode: false };
     }
+    
+    // Better question detection - identify code generation intent
+    const codeGenerationPatterns = [
+        /\b(generate|create|build|implement|add|write|make)\b.*\b(code|function|class|component|service|api|endpoint|handler)\b/i,
+        /\b(how (do|can) (i|we))\b.*\b(implement|create|add|build)\b/i,
+        /\bcan you (help (me|us) )?(create|generate|implement|add|write)\b/i,
+        /\b(refactor|optimize|improve|enhance|update)\b.*\b(this|the|my)\b/i
+    ];
+    
+    const isCodeGeneration = codeGenerationPatterns.some(pattern => pattern.test(request.prompt));
+    
+    if (isCodeGeneration) {
+        // Show a hint that this looks like code generation
+        stream.markdown(`💡 *This looks like a code generation request. Using @workspace for best results...*\n\n`);
+    }
 
     // Check KB status and offer to scan if needed
     const kbStatus = await checkKBStatus(kbManager);

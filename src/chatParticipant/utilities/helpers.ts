@@ -87,56 +87,75 @@ export async function renderContextReferences(stream: vscode.ChatResponseStream,
     const refCount = totalReferences + (totalDataFlows > 0 ? 1 : 0);
 
     stream.markdown('---\n\n');
-    stream.markdown(`### Used ${refCount} references\n\n`);
+    
+    // Compact summary line
+    const contextSizeKB = (info.totalContextSize / 1024).toFixed(1);
+    stream.markdown(`### 📚 Used ${refCount} references (${contextSizeKB} KB context)\n\n`);
 
+    // Collapsible detailed section
+    stream.markdown(`<details>\n<summary>🔍 View detailed context breakdown</summary>\n\n`);
+    
     if (info.features.length > 0) {
-        stream.markdown(`**KB Features (${info.features.length}):**\n`);
+        stream.markdown(`#### KB Features (${info.features.length})\n`);
         for (const feature of info.features) {
             const langs = feature.languages.join(', ');
-            stream.markdown(`- ${feature.name} (${feature.componentCount} components, ${langs})\n`);
+            stream.markdown(`- **${feature.name}**\n`);
+            stream.markdown(`  - Components: ${feature.componentCount}\n`);
+            stream.markdown(`  - Languages: ${langs}\n`);
+            if (feature.dataFlowCount > 0) {
+                stream.markdown(`  - Data flows: ${feature.dataFlowCount}\n`);
+            }
         }
         stream.markdown(`\n`);
     }
 
     if (info.filesIncluded.length > 0) {
-        stream.markdown(`**Code Files (${info.filesIncluded.length}):**\n`);
+        stream.markdown(`#### Code Files (${info.filesIncluded.length})\n`);
         for (const file of info.filesIncluded) {
             const fileName = file.path.split('/').pop() || file.path;
-            stream.markdown(`- ${fileName} (${file.lineCount} lines)\n`);
+            stream.markdown(`- **${fileName}**\n`);
+            stream.markdown(`  - Size: ${(file.size / 1024).toFixed(1)} KB\n`);
+            stream.markdown(`  - Lines: ${file.lineCount}\n`);
+            stream.markdown(`  - Reason: ${file.reason}\n`);
         }
         stream.markdown(`\n`);
     }
 
     if (info.selectionsIncluded.length > 0) {
-        stream.markdown(`**Code Selections (${info.selectionsIncluded.length}):**\n`);
+        stream.markdown(`#### Code Selections (${info.selectionsIncluded.length})\n`);
         for (const sel of info.selectionsIncluded) {
             const fileName = sel.path.split('/').pop() || sel.path;
-            stream.markdown(`- ${fileName}:${sel.lines} (${sel.language})\n`);
+            stream.markdown(`- **${fileName}:${sel.lines}**\n`);
+            stream.markdown(`  - Language: ${sel.language}\n`);
+            stream.markdown(`  - Size: ${(sel.size / 1024).toFixed(1)} KB\n`);
+            stream.markdown(`  - Reason: ${sel.reason}\n`);
         }
         stream.markdown(`\n`);
     }
 
     if (info.selectionAnalyses.length > 0 && info.selectionsIncluded.length === 0) {
-        stream.markdown(`**Analyzed Selections (${info.selectionAnalyses.length}):**\n`);
+        stream.markdown(`#### Analyzed Selections (${info.selectionAnalyses.length})\n`);
         for (const analysis of info.selectionAnalyses) {
             const fileName = analysis.filePath.split('/').pop() || analysis.filePath;
-            stream.markdown(`- ${fileName}:${analysis.lines} (${analysis.language})\n`);
+            stream.markdown(`- **${fileName}:${analysis.lines}** (${analysis.language})\n`);
         }
         stream.markdown(`\n`);
     }
 
     if (totalDataFlows > 0) {
-        stream.markdown(`**Data Flows:** ${totalDataFlows} connections across ${info.features.length} feature${info.features.length > 1 ? 's' : ''}\n\n`);
+        stream.markdown(`#### Data Flow Analysis\n`);
+        stream.markdown(`- **Total connections:** ${totalDataFlows}\n`);
+        stream.markdown(`- **Across features:** ${info.features.length}\n\n`);
     }
-
-    const contextSizeKB = (info.totalContextSize / 1024).toFixed(1);
+    
+    // Summary statistics
     const parts: string[] = [];
     if (totalComponents > 0) { parts.push(`${totalComponents} components`); }
     if (totalDataFlows > 0) { parts.push(`${totalDataFlows} data flows`); }
     parts.push(`${contextSizeKB} KB total`);
-    stream.markdown(`**Total Context:** ${parts.join(' · ')}\n\n`);
-
-    stream.markdown('---\n\n');
+    stream.markdown(`**Total Context Sent:** ${parts.join(' · ')}\n\n`);
+    
+    stream.markdown(`</details>\n\n`);
 }
 
 /**
