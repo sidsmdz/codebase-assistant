@@ -166,9 +166,8 @@ export class IngestionService {
                         features: []
                     };
                     modules.push(singleModule);
-                    // Manually add to detector for getModuleForFile to work
-                    this.moduleDetector['modules'].set(singleModule.id, singleModule);
-                    this.moduleDetector['modulesByPath'].set(singleModule.path, singleModule);
+                    // Register with detector for getModuleForFile to work
+                    this.moduleDetector.registerModule(singleModule);
                 }
                 
                 // Save module information to KB
@@ -186,12 +185,19 @@ export class IngestionService {
                 // Find module for first component in feature
                 const firstComponent = components.find(c => c.id === feature.components[0]);
                 if (firstComponent) {
+                    console.log(`Associating feature "${feature.name}" with module for file: ${firstComponent.filePath}`);
                     const module = this.moduleDetector.getModuleForFile(firstComponent.filePath);
                     if (module) {
+                        console.log(`  ✅ Matched module: ${module.name} (${module.path})`);
                         feature.module = module.name;
                         feature.modulePath = module.path;
                         this.moduleDetector.addFeatureToModule(feature.id, firstComponent.filePath);
+                    } else {
+                        console.log(`  ⚠️ No module matched for ${firstComponent.filePath}`);
+                        console.log(`  Available modules:`, this.moduleDetector.getAllModules().map(m => `${m.name} at ${m.path}`));
                     }
+                } else {
+                    console.log(`⚠️ Feature "${feature.name}" has no components!`);
                 }
 
                 // Detect cross-module dependencies

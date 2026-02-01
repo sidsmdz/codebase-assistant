@@ -92,6 +92,14 @@ export class ModuleDetector {
     }
 
     /**
+     * Manually register a module (for synthetic/fallback modules)
+     */
+    registerModule(module: ProjectModule): void {
+        this.modules.set(module.id, module);
+        this.modulesByPath.set(module.path, module);
+    }
+
+    /**
      * Get module by name
      */
     getModuleByName(name: string): ProjectModule | undefined {
