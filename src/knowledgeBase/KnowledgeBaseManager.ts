@@ -1199,6 +1199,84 @@ export class KnowledgeBaseManager {
     }
 
     /**
+     * Search components directly by name, type, or file path
+     * NEW in V2: Enables component-level search
+     */
+    async searchComponents(query: string, limit: number = 10): Promise<FeatureComponent[]> {
+        if (!this.isReady) {
+            return [];
+        }
+
+        try {
+            const lowerQuery = query.toLowerCase();
+            
+            // Search by component name, type, or file path
+            const results = this.db.exec(`
+                SELECT * FROM feature_components 
+                WHERE LOWER(name) LIKE ? 
+                   OR LOWER(component_type) LIKE ?
+                   OR LOWER(file_path) LIKE ?
+                LIMIT ?
+            `, [`%${lowerQuery}%`, `%${lowerQuery}%`, `%${lowerQuery}%`, limit]);
+
+            if (!results[0] || results[0].values.length === 0) {
+                return [];
+            }
+
+            const columns = results[0].columns;
+            const components: FeatureComponent[] = results[0].values.map(row => {
+                const obj: any = {};
+                columns.forEach((col, idx) => {
+                    obj[col] = row[idx];
+                });
+
+                return {
+                    id: obj.id,
+                    name: obj.name,
+                    type: obj.component_type as ComponentType,
+                    filePath: obj.file_path,
+                    language: obj.language,
+                    code: obj.code,
+                    startLine: obj.start_line,
+                    endLine: obj.end_line,
+                    dependencies: JSON.parse(obj.dependencies_json || '[]'),
+                    dependents: JSON.parse(obj.dependents_json || '[]'),
+                    annotations: JSON.parse(obj.annotations_json || '[]'),
+                    imports: JSON.parse(obj.imports_json || '[]'),
+                    exports: JSON.parse(obj.exports_json || '[]')
+                } as FeatureComponent;
+            });
+
+            return components;
+        } catch (error) {
+            console.error('Error searching components:', error);
+            return [];
+        }
+    }
+
+    /**
+     * Unified search - searches both features AND components
+     * NEW in V2: Single search entry point
+     */
+    async search(query: string, options?: { 
+        featureLimit?: number; 
+        componentLimit?: number;
+    }): Promise<{
+        features: Feature[];
+        components: FeatureComponent[];
+    }> {
+        const featureLimit = options?.featureLimit || 5;
+        const componentLimit = options?.componentLimit || 10;
+
+        const [features, components] = await Promise.all([
+            this.searchFeatures(query, featureLimit),
+            this.searchComponents(query, componentLimit)
+        ]);
+
+        return { features, components };
+    }
+
+    /**
      * Get feature statistics
      */
     async getFeatureStats(): Promise<{
