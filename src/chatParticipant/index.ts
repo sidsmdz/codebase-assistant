@@ -1,51 +1,46 @@
 import * as vscode from 'vscode';
 import { KnowledgeBaseManager } from '../knowledgeBase/KnowledgeBaseManager';
-import { ContextBuilder } from '../knowledgeBase/ContextBuilder';
-import { SelectionAnalyzer } from '../analysis/SelectionAnalyzer';
-import { SessionManager } from '../SessionManager';
-
-// Command routing
-import { resolveCommandAlias } from './commandRouter';
-
-// Handlers - All extracted!
-import { handleScan } from './handlers/scanHandler';
-import { handleExplain } from './handlers/explainHandler';
-import { handleAnalyze } from './handlers/analyzeHandler';
-import { handleFeatures } from './handlers/featuresHandler';
-import { handleStats } from './handlers/statsHandler';
-import { handleReset } from './handlers/resetHandler';
-import { handleTrace } from './handlers/traceHandler';
-import { handleImpact } from './handlers/impactHandler';
-import { handleSessions } from './handlers/sessionsHandler';
-import { handleSession } from './handlers/sessionHandler';
-import { handleGenerate } from './handlers/generateHandler';
-import { handleImplement } from './handlers/implementHandler';
-import { handleAsk } from './handlers/askHandler';
-import { handleQuestion } from './handlers/questionHandler';
-import { handleModules } from './handlers/modulesHandler';
+import { SessionManagerV2 } from '../session/SessionManagerV2';
 
 /**
- * MODULAR ARCHITECTURE - COMPLETE ✅
+ * CHAT PARTICIPANT V2 - SIMPLIFIED ARCHITECTURE ✨
  * 
- * All handlers have been successfully extracted from the monolithic chatParticipant.ts.
+ * DESIGN PHILOSOPHY:
+ * - Piggyback on Copilot instead of competing with it
+ * - Provide rich context through session management
+ * - Expose knowledge base through chat variables (#kb:name)
+ * - Keep commands minimal and focused
  * 
- * Completed:
- * ✅ Command aliases supported (/g, /e, /a, /i, /t, /s, /f)
- * ✅ All utilities extracted (helpers, continueHandler, disambiguator)
- * ✅ All 13 handlers extracted:
- *    - scanHandler, explainHandler, analyzeHandler, featuresHandler, statsHandler
- *    - resetHandler, traceHandler, impactHandler, sessionsHandler, sessionHandler
- *    - generateHandler, askHandler, questionHandler
+ * ONLY 5 COMMANDS:
+ * ✅ /scan     - Index codebase (features + components)
+ * ✅ /find     - Search knowledge base (unified search)
+ * ✅ /map      - Visualize architecture (features/components)
+ * ✅ /session  - Switch/create sessions with auto-context loading
+ * ✅ /sessions - List all sessions with timeline view
+ * 
+ * REMOVED (let Copilot handle these):
+ * ❌ /explain, /analyze, /generate, /implement, /ask
+ * ❌ /trace, /impact, /features, /stats, /modules, /reset
+ * 
+ * V2 FEATURES:
+ * - Sessions automatically track features, components, files
+ * - Context restoration when switching sessions
+ * - Timeline tracking for all interactions
+ * - Chat variables for easy context injection
  */
+
+// V2 Handlers - Only 5 essential commands
+import { handleScan } from './handlers/scanHandler';
+import { handleFind } from './handlers/findHandler';
+import { handleMap } from './handlers/mapHandler';
+import { handleSession } from './handlers/sessionHandlerV2';
+import { handleSessions } from './handlers/sessionsHandlerV2';
 export function registerChatParticipant(
     extContext: vscode.ExtensionContext,
     kbManager: KnowledgeBaseManager,
-    sessionManager: SessionManager,
+    sessionManagerV2: SessionManagerV2,
     onScanComplete?: () => void
 ): vscode.Disposable {
-
-    const contextBuilder = new ContextBuilder(kbManager);
-    const selectionAnalyzer = new SelectionAnalyzer(kbManager);
 
     const participant = vscode.chat.createChatParticipant(
         'autoforge.chatParticipant',
@@ -56,145 +51,142 @@ export function registerChatParticipant(
             token: vscode.CancellationToken
         ): Promise<vscode.ChatResult> => {
             
-            // ✨ Resolve command aliases (/g → /generate, /e → /explain, etc.)
-            const resolvedCommand = resolveCommandAlias(request.command);
-            
             try {
                 // Route to appropriate handler based on command
-                switch (resolvedCommand) {
+                switch (request.command) {
                     case 'scan':
                         await handleScan(stream, kbManager, token, onScanComplete);
                         return { metadata: { command: 'scan' } };
 
-                    case 'explain':
-                        await handleExplain(request, stream, kbManager, contextBuilder, selectionAnalyzer, sessionManager, token);
-                        return { metadata: { command: 'explain' } };
+                    case 'find':
+                        await handleFind(request, stream, kbManager, sessionManagerV2, token);
+                        return { metadata: { command: 'find' } };
 
-                    case 'analyze':
-                        await handleAnalyze(request, stream, kbManager, selectionAnalyzer, token);
-                        return { metadata: { command: 'analyze' } };
-
-                    case 'features':
-                        await handleFeatures(stream, kbManager, token);
-                        return { metadata: { command: 'features' } };
-
-                    case 'stats':
-                        await handleStats(stream, kbManager, token);
-                        return { metadata: { command: 'stats' } };
-
-                    case 'reset':
-                        await handleReset(stream, kbManager, token);
-                        return { metadata: { command: 'reset' } };
-
-                    case 'trace':
-                        await handleTrace(request, stream, kbManager, selectionAnalyzer, token);
-                        return { metadata: { command: 'trace' } };
-
-                    case 'impact':
-                        await handleImpact(request, stream, kbManager, selectionAnalyzer, token);
-                        return { metadata: { command: 'impact' } };
-
-                    case 'sessions':
-                        await handleSessions(stream, sessionManager, token);
-                        return { metadata: { command: 'sessions' } };
+                    case 'map':
+                        await handleMap(request, stream, kbManager, token);
+                        return { metadata: { command: 'map' } };
 
                     case 'session':
-                        await handleSession(request, stream, sessionManager, token);
+                        await handleSession(request, stream, sessionManagerV2, token);
                         return { metadata: { command: 'session' } };
 
-                    case 'generate':
-                        await handleGenerate(request, stream, kbManager, sessionManager, token);
-                        return { metadata: { command: 'generate' } };
-
-                    case 'implement':
-                        await handleImplement(request, stream, kbManager, sessionManager, token);
-                        return { metadata: { command: 'implement' } };
-
-                    case 'ask':
-                        await handleAsk(request, stream, kbManager, selectionAnalyzer, token);
-                        return { metadata: { command: 'ask' } };
-
-                    case 'modules':
-                        const modulesResult = await handleModules(request, stream, kbManager, token);
-                        return { metadata: { command: 'modules', hasCode: modulesResult.hasCode } };
+                    case 'sessions':
+                        await handleSessions(request, stream, sessionManagerV2, token);
+                        return { metadata: { command: 'sessions' } };
 
                     default:
-                        // No command or unrecognized command → handle as question
-                        const result = await handleQuestion(request, chatContext, stream, kbManager, contextBuilder, selectionAnalyzer, sessionManager, token);
-                        return { 
-                            metadata: { 
-                                command: 'question',
-                                ...result.analysisContext
-                            } 
-                        };
+                        // No command → show help
+                        stream.markdown(`## 🤖 AutoForge - Context Provider for Copilot\n\n`);
+                        stream.markdown(`AutoForge enhances GitHub Copilot with rich codebase context and session management.\n\n`);
+                        
+                        stream.markdown(`### 📖 Available Commands:\n\n`);
+                        stream.markdown(`- \`/scan\` - Index codebase (features + components)\n`);
+                        stream.markdown(`- \`/find <query>\` - Search knowledge base\n`);
+                        stream.markdown(`- \`/map\` - Visualize architecture\n`);
+                        stream.markdown(`- \`/session <name>\` - Switch/create session\n`);
+                        stream.markdown(`- \`/sessions\` - List all sessions\n\n`);
+                        
+                        stream.markdown(`### 💡 How to Use:\n\n`);
+                        stream.markdown(`1. **Index your codebase:** \`@autoforge /scan\`\n`);
+                        stream.markdown(`2. **Search for features:** \`@autoforge /find authentication\`\n`);
+                        stream.markdown(`3. **Create a session:** \`@autoforge /session auth-work\`\n`);
+                        stream.markdown(`4. **Use with Copilot:** \`@workspace implement login based on auth-work session\`\n\n`);
+                        
+                        stream.markdown(`### 🎯 Key Features:\n\n`);
+                        stream.markdown(`- **Automatic Context:** Sessions track features, components, and files\n`);
+                        stream.markdown(`- **Timeline Tracking:** See your interaction history\n`);
+                        stream.markdown(`- **Context Restoration:** Switch sessions and restore full context\n`);
+                        stream.markdown(`- **Seamless Integration:** Context flows to @workspace automatically\n\n`);
+                        
+                        stream.markdown(`💡 **Tip:** Use \`@autoforge /find <query>\` to explore, then let \`@workspace\` handle code generation!\n`);
+                        
+                        return { metadata: { command: 'help' } };
                 }
             } catch (error) {
                 stream.markdown(`⚠️ An error occurred: ${error instanceof Error ? error.message : String(error)}`);
                 console.error('Chat participant error:', error);
-                return { metadata: { command: resolvedCommand, error: true } };
+                return { metadata: { command: request.command, error: true } };
             }
         }
     );
 
-    // Follow-up provider
+    // V2 Follow-up suggestions
     participant.followupProvider = {
         provideFollowups(result: vscode.ChatResult, context: vscode.ChatContext, token: vscode.CancellationToken) {
             const command = result.metadata?.command;
 
-            if (command === 'generate' || command === 'implement' || command === 'ask') {
+            // Command-specific follow-ups
+            if (command === 'scan') {
                 return [
                     {
-                        prompt: 'Continue from where we left off and summarize what was generated',
-                        label: '🔙 Back to AutoForge'
+                        command: 'find',
+                        prompt: 'Search for authentication features',
+                        label: '🔎 Search Features'
                     },
                     {
-                        prompt: 'Save the patterns from the generated code to the knowledge base',
-                        command: 'scan',
-                        label: '💾 Save Pattern to KB'
-                    },
-                    {
-                        command: 'analyze',
-                        prompt: 'Analyze the generated code for quality and dependencies',
-                        label: '🔍 Analyze Generated Code'
-                    },
-                    {
-                        command: 'impact',
-                        prompt: 'Check the impact of the changes just made',
-                        label: '💥 Check Impact'
+                        command: 'map',
+                        prompt: 'Show architecture map',
+                        label: '🗺️ View Architecture'
                     }
                 ];
             }
 
-            const followups: vscode.ChatFollowup[] = [
+            if (command === 'find') {
+                return [
+                    {
+                        command: 'session',
+                        prompt: 'Create a session for this work',
+                        label: '📂 Create Session'
+                    },
+                    {
+                        prompt: '@workspace implement this feature',
+                        label: '🤖 Implement with Copilot'
+                    }
+                ];
+            }
+
+            if (command === 'map') {
+                return [
+                    {
+                        command: 'find',
+                        prompt: 'Search for specific components',
+                        label: '🔎 Search'
+                    },
+                    {
+                        command: 'session',
+                        prompt: 'Create session for this area',
+                        label: '📂 Create Session'
+                    }
+                ];
+            }
+
+            if (command === 'session' || command === 'sessions') {
+                return [
+                    {
+                        command: 'find',
+                        prompt: 'Search knowledge base',
+                        label: '🔎 Search'
+                    },
+                    {
+                        prompt: '@workspace continue work on this session',
+                        label: '🤖 Continue with Copilot'
+                    }
+                ];
+            }
+
+            // Default follow-ups
+            return [
                 {
-                    prompt: 'provide a more detailed explanation with implementation details, edge cases, and technical considerations',
-                    label: '🔍 Tell Me More'
+                    command: 'find',
+                    prompt: 'Search knowledge base',
+                    label: '🔎 Search'
                 },
                 {
-                    prompt: 'provide concrete code examples demonstrating how to use this, common usage patterns, and integration examples',
-                    label: '📚 Give Examples'
-                },
-                {
-                    prompt: 'explain the architectural design: how this fits into the system, design patterns used, and architectural decisions',
-                    label: '🏗️ Explain Architecture'
-                },
-                {
-                    prompt: 'suggest best practices: code quality improvements, testing strategies, and performance considerations',
-                    label: '🎯 Show Best Practices'
-                },
-                {
-                    command: 'generate',
-                    prompt: 'Generate code guidance based on our conversation',
-                    label: '⚡ Generate Code'
-                },
-                {
-                    command: 'implement',
-                    prompt: 'Implement changes using @workspace agent',
-                    label: '🤖 Implement with Agent'
+                    command: 'sessions',
+                    prompt: 'View all sessions',
+                    label: '📚 My Sessions'
                 }
             ];
-
-            return followups;
         }
     };
 
