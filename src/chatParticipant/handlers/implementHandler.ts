@@ -2,10 +2,14 @@ import * as vscode from 'vscode';
 import { KnowledgeBaseManager } from '../../knowledgeBase/KnowledgeBaseManager';
 import { SessionManager } from '../../SessionManager';
 import { ContextReferenceInfo } from '../types';
-import { renderContextReferences, selectModel } from '../utilities/helpers';
+import { renderContextReferences } from '../utilities/helpers';
 import { TokenManager, ContextItem, estimateTokenCount, detectModelContextLimit } from '../utilities/tokenManager';
 
-export async function handleGenerate(
+/**
+ * Handler for /implement command
+ * Hands off to @workspace agent with KB context for autonomous file editing
+ */
+export async function handleImplement(
     request: vscode.ChatRequest,
     stream: vscode.ChatResponseStream,
     kbManager: KnowledgeBaseManager,
@@ -15,15 +19,18 @@ export async function handleGenerate(
     const userIntent = request.prompt.trim();
 
     if (!userIntent) {
-        stream.markdown('## ⚡ Generate Code with Copilot\n\n');
-        stream.markdown('This command helps you generate code using GitHub Copilot with AutoForge\'s knowledge base context.\n\n');
-        stream.markdown('**Usage:** `/generate <what you want to create>`\n\n');
+        stream.markdown('## 🤖 Implement with @workspace Agent\n\n');
+        stream.markdown('This command hands off to @workspace with your KB context, enabling autonomous code generation and file editing.\n\n');
+        stream.markdown('**Usage:** `/implement <what you want to create>`\n\n');
         stream.markdown('**Examples:**\n');
-        stream.markdown('- `/generate Add PostgreSQL database connection`\n');
-        stream.markdown('- `/generate Create REST API endpoint for user management`\n');
-        stream.markdown('- `/generate Implement authentication middleware`\n');
-        stream.markdown('- `/generate Add Redis caching layer`\n\n');
-        stream.markdown('💡 **Tip:** After using @autoforge to analyze your codebase, use this to generate code that follows your existing patterns!\n');
+        stream.markdown('- `/implement Add PostgreSQL database connection`\n');
+        stream.markdown('- `/implement Create REST API endpoint for user management`\n');
+        stream.markdown('- `/implement Implement authentication middleware`\n');
+        stream.markdown('- `/implement Add Redis caching layer`\n\n');
+        stream.markdown('**Difference from /generate:**\n');
+        stream.markdown('- `/generate` - Direct LLM response with code suggestions (no file edits)\n');
+        stream.markdown('- `/implement` - @workspace agent mode (autonomous file creation/editing)\n\n');
+        stream.markdown('💡 **Tip:** Use `/implement` when you want actual code changes, `/generate` for guidance!\n');
         return;
     }
 
@@ -128,16 +135,16 @@ export async function handleGenerate(
     // Show warnings if context was truncated
     TokenManager.renderTokenWarning(stream, optimized, modelInfo);
 
-    // Build final prompt with KB context
-    const finalPrompt = `${userIntent}\n\n${optimized.content}\n\n**Please implement this following the architectural patterns and best practices identified above.**`;
+    // Build final prompt for @workspace agent
+    const finalPrompt = `${userIntent}\n\n## Architecture Context from AutoForge Knowledge Base\n\n${optimized.content}\n\n**Please implement this following the architectural patterns and best practices identified above.**`;
 
     // Build feature details for context references
-    const generateFeatureDetails: ContextReferenceInfo['features'] = [];
+    const implementFeatureDetails: ContextReferenceInfo['features'] = [];
     try {
         const relevantFeatures = await kbManager.searchFeatures(userIntent, 5);
         for (const f of relevantFeatures.slice(0, 3)) {
             const components = await kbManager.getComponentsForFeature(f.id);
-            generateFeatureDetails.push({
+            implementFeatureDetails.push({
                 name: f.name,
                 componentCount: components.length,
                 languages: f.languages,
@@ -149,7 +156,7 @@ export async function handleGenerate(
     // Show what context was used
     const contextRefInfo: ContextReferenceInfo = {
         userQuery: userIntent,
-        features: generateFeatureDetails,
+        features: implementFeatureDetails,
         selectionAnalyses: [],
         filesIncluded: [],
         selectionsIncluded: [],
@@ -157,33 +164,19 @@ export async function handleGenerate(
     };
     renderContextReferences(stream, contextRefInfo);
 
-    // Call LLM directly with KB context (no @workspace handoff)
-    stream.progress('Generating implementation...');
+    // Hand off to @workspace agent with enriched context
+    stream.markdown('\n---\n\n## 🚀 Handing off to @workspace Agent\n\n');
+    stream.markdown('**Your request:** ' + userIntent + '\n\n');
+    stream.markdown('✅ Added context from AutoForge knowledge base\n\n');
+    stream.markdown('Opening @workspace with enriched context...\n\n');
+    stream.markdown('*The @workspace agent will autonomously create/edit files based on the architecture patterns from your KB.*\n\n');
     
     try {
-        const model = await selectModel(token);
-        if (!model) {
-            stream.markdown('\n⚠️ No Copilot language model available. Please ensure GitHub Copilot is enabled.\n');
-            return;
-        }
-
-        const messages = [vscode.LanguageModelChatMessage.User(finalPrompt)];
-        const response = await model.sendRequest(messages, {}, token);
-        
-        stream.markdown('\n---\n\n');
-        for await (const fragment of response.text) {
-            stream.markdown(fragment);
-        }
-        
+        await vscode.commands.executeCommand('workbench.action.chat.open', {
+            query: `@workspace ${finalPrompt}`
+        });
     } catch (err) {
-        if (err instanceof vscode.LanguageModelError) {
-            stream.markdown(`\n\n⚠️ **Error:** ${err.message}\n`);
-            if (err.message.includes('token')) {
-                stream.markdown('\n💡 Try simplifying your request or targeting specific features.\n');
-            }
-        } else {
-            console.error('Generate handler error:', err);
-            stream.markdown(`\n\n⚠️ **Error:** ${err instanceof Error ? err.message : String(err)}\n`);
-        }
+        stream.markdown(`\n\n⚠️ Failed to open @workspace: ${err instanceof Error ? err.message : String(err)}\n`);
+        stream.markdown(`\nYou can manually type: \`@workspace ${userIntent}\``);
     }
 }

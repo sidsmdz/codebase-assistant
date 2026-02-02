@@ -19,6 +19,7 @@ import { handleImpact } from './handlers/impactHandler';
 import { handleSessions } from './handlers/sessionsHandler';
 import { handleSession } from './handlers/sessionHandler';
 import { handleGenerate } from './handlers/generateHandler';
+import { handleImplement } from './handlers/implementHandler';
 import { handleAsk } from './handlers/askHandler';
 import { handleQuestion } from './handlers/questionHandler';
 import { handleModules } from './handlers/modulesHandler';
@@ -105,6 +106,10 @@ export function registerChatParticipant(
                         await handleGenerate(request, stream, kbManager, sessionManager, token);
                         return { metadata: { command: 'generate' } };
 
+                    case 'implement':
+                        await handleImplement(request, stream, kbManager, sessionManager, token);
+                        return { metadata: { command: 'implement' } };
+
                     case 'ask':
                         await handleAsk(request, stream, kbManager, selectionAnalyzer, token);
                         return { metadata: { command: 'ask' } };
@@ -136,10 +141,10 @@ export function registerChatParticipant(
         provideFollowups(result: vscode.ChatResult, context: vscode.ChatContext, token: vscode.CancellationToken) {
             const command = result.metadata?.command;
 
-            if (command === 'generate' || command === 'ask') {
+            if (command === 'generate' || command === 'implement' || command === 'ask') {
                 return [
                     {
-                        prompt: 'Continue from where we left off and summarize what @workspace generated',
+                        prompt: 'Continue from where we left off and summarize what was generated',
                         label: '🔙 Back to AutoForge'
                     },
                     {
@@ -179,8 +184,13 @@ export function registerChatParticipant(
                 },
                 {
                     command: 'generate',
-                    prompt: 'Generate code based on our conversation context',
-                    label: '⚡ Generate Code with Copilot'
+                    prompt: 'Generate code guidance based on our conversation',
+                    label: '⚡ Generate Code'
+                },
+                {
+                    command: 'implement',
+                    prompt: 'Implement changes using @workspace agent',
+                    label: '🤖 Implement with Agent'
                 }
             ];
 

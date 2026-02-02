@@ -3,7 +3,7 @@ import { KnowledgeBaseManager } from '../../knowledgeBase/KnowledgeBaseManager';
 import { SelectionAnalyzer } from '../../analysis/SelectionAnalyzer';
 import { ContextReferenceInfo } from '../types';
 import { getCodeSelection, renderContextReferences } from '../utilities/helpers';
-import { TokenManager, ContextItem, estimateTokenCount } from '../utilities/tokenManager';
+import { TokenManager, ContextItem, estimateTokenCount, detectModelContextLimit } from '../utilities/tokenManager';
 
 export async function handleAsk(
     request: vscode.ChatRequest,
@@ -29,6 +29,9 @@ export async function handleAsk(
 
     stream.progress(`Understanding your request...`);
 
+    // Detect model and adapt token limits
+    const modelInfo = await detectModelContextLimit();
+
     // Get code selection from chat references or active editor (optional now)
     const selection = await getCodeSelection(request.references);
 
@@ -37,6 +40,10 @@ export async function handleAsk(
     let contextPrompt = `## User Request\n${userRequest}\n\n`;
     let featureCount = 0;
     let componentCount = 0;
+    
+    // Determine enrichment mode based on available tokens
+    const enrichmentMode = modelInfo.contextLimit >= 50000 ? 'detailed' : 
+                          modelInfo.contextLimit >= 10000 ? 'normal' : 'summary';
 
     // If we have a code selection, analyze it
     if (selection) {

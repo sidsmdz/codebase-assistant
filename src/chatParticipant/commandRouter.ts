@@ -4,6 +4,7 @@
  */
 export const COMMAND_ALIASES: Record<string, string> = {
     'g': 'generate',
+    'im': 'implement',
     'e': 'explain',
     'a': 'analyze',
     'i': 'impact',

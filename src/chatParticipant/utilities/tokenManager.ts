@@ -5,12 +5,23 @@ import { Feature } from '../../analysis/FeatureAnalyzer';
  * Token limits for different LLM models
  */
 export const TOKEN_LIMITS = {
-    GPT4: 128000,           // GPT-4 Turbo
-    GPT4O: 128000,          // GPT-4o
+    GPT4: 128000,           // GPT-4 Turbo (Pro)
+    GPT4O: 128000,          // GPT-4o (Pro)
     GPT35: 16385,           // GPT-3.5 Turbo
-    CLAUDE_SONNET: 200000,  // Claude 3.5 Sonnet
-    CLAUDE_OPUS: 200000,    // Claude 3 Opus
-    DEFAULT: 100000         // Conservative default
+    CLAUDE_SONNET: 200000,  // Claude 3.5 Sonnet (Pro)
+    CLAUDE_OPUS: 200000,    // Claude 3 Opus (Pro)
+    FREE_TIER: 8000,        // Conservative for free Copilot (GPT-3.5 or smaller context)
+    DEFAULT: 8000           // Conservative default for unknown models
+};
+
+/**
+ * Recommended context limits for different tiers
+ * These are more conservative to leave room for responses
+ */
+export const CONTEXT_LIMITS = {
+    PRO: 100000,            // Pro tier: use up to 100K for context
+    FREE: 4000,             // Free tier: use max 4K for context
+    MINIMAL: 2000           // Minimal mode: just essential context
 };
 
 /**
@@ -22,6 +33,59 @@ export function estimateTokenCount(text: string): number {
     // - Code has more tokens per character than prose
     // - Average: 1 token ≈ 3.5-4 characters
     return Math.ceil(text.length / 3.5);
+}
+
+/**
+ * Detect available Copilot model and return appropriate context limit
+ * Returns conservative limits for free tier, more generous for pro
+ */
+export async function detectModelContextLimit(): Promise<{ contextLimit: number; modelName: string; isPro: boolean }> {
+    try {
+        // Try to get available models
+        const models = await vscode.lm.selectChatModels({
+            vendor: 'copilot',
+            family: 'gpt-4o'
+        });
+        
+        // If GPT-4o is available, user likely has Pro
+        if (models.length > 0) {
+            return {
+                contextLimit: CONTEXT_LIMITS.PRO,
+                modelName: 'gpt-4o',
+                isPro: true
+            };
+        }
+        
+        // Check for GPT-4
+        const gpt4Models = await vscode.lm.selectChatModels({
+            vendor: 'copilot',
+            family: 'gpt-4'
+        });
+        
+        if (gpt4Models.length > 0) {
+            return {
+                contextLimit: CONTEXT_LIMITS.PRO,
+                modelName: 'gpt-4',
+                isPro: true
+            };
+        }
+        
+        // Fallback: assume free tier with GPT-3.5 or limited context
+        console.log('No premium models detected, using free tier limits');
+        return {
+            contextLimit: CONTEXT_LIMITS.FREE,
+            modelName: 'gpt-3.5-turbo (estimated)',
+            isPro: false
+        };
+    } catch (err) {
+        console.warn('Failed to detect model, using conservative limits:', err);
+        // Be conservative if detection fails
+        return {
+            contextLimit: CONTEXT_LIMITS.FREE,
+            modelName: 'unknown',
+            isPro: false
+        };
+    }
 }
 
 /**
@@ -300,11 +364,15 @@ export class TokenManager {
     
     /**
      * Enrich feature context items with component details
-     * Call this after createFeatureItems if you have access to KnowledgeBaseManager
+     * Uses incremental strategy: summary first, details only if space permits
+     * 
+     * @param mode 'summary' = names only, 'normal' = names + paths, 'detailed' = with signatures
      */
     static async enrichFeatureItems(
         items: ContextItem[],
-        getComponents: (featureId: string) => Promise<any[]>
+        getComponents: (featureId: string) => Promise<any[]>,
+        mode: 'summary' | 'normal' | 'detailed' = 'normal',
+        maxComponentsPerFeature: number = 5
     ): Promise<ContextItem[]> {
         const enriched: ContextItem[] = [];
         
@@ -320,11 +388,31 @@ export class TokenManager {
                 
                 if (components.length > 0) {
                     additionalContent += `\n**Key Components:**\n`;
-                    for (const comp of components.slice(0, 5)) {
-                        additionalContent += `- \`${comp.name}\` (${comp.type}) - ${comp.filePath}\n`;
+                    
+                    const limit = Math.min(maxComponentsPerFeature, components.length);
+                    for (const comp of components.slice(0, limit)) {
+                        switch (mode) {
+                            case 'summary':
+                                // Minimal: just names and types
+                                additionalContent += `- \`${comp.name}\` (${comp.type})\n`;
+                                break;
+                            case 'normal':
+                                // Default: names, types, and file paths
+                                additionalContent += `- \`${comp.name}\` (${comp.type}) - ${comp.filePath}\n`;
+                                break;
+                            case 'detailed':
+                                // Full: include method signatures or key properties
+                                additionalContent += `- \`${comp.name}\` (${comp.type}) - ${comp.filePath}\n`;
+                                if (comp.methods && comp.methods.length > 0) {
+                                    const methodSample = comp.methods.slice(0, 2).map((m: any) => m.name).join(', ');
+                                    additionalContent += `  Methods: ${methodSample}${comp.methods.length > 2 ? '...' : ''}\n`;
+                                }
+                                break;
+                        }
                     }
-                    if (components.length > 5) {
-                        additionalContent += `- ...and ${components.length - 5} more\n`;
+                    
+                    if (components.length > limit) {
+                        additionalContent += `- ...and ${components.length - limit} more\n`;
                     }
                 }
                 
@@ -346,7 +434,11 @@ export class TokenManager {
     /**
      * Notify user about token limit issues
      */
-    static renderTokenWarning(stream: vscode.ChatResponseStream, result: OptimizedContext): void {
+    static renderTokenWarning(
+        stream: vscode.ChatResponseStream, 
+        result: OptimizedContext,
+        modelInfo?: { contextLimit: number; isPro: boolean }
+    ): void {
         if (result.truncated || result.itemsExcluded > 0) {
             stream.markdown(`\n⚠️ **Context Optimized for Token Limits**\n\n`);
             stream.markdown(`- Included: ${result.itemsIncluded} items (~${result.totalTokens.toLocaleString()} tokens)\n`);
@@ -356,6 +448,7 @@ export class TokenManager {
             if (result.truncated) {
                 stream.markdown(`- Some items were truncated to fit\n`);
             }
+            
             stream.markdown(`\n💡 **Tip:** Try refining your query to target specific features for better context.\n\n`);
         }
     }
