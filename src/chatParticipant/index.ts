@@ -59,7 +59,7 @@ export function registerChatParticipant(
                         return { metadata: { command: 'scan' } };
 
                     case 'find':
-                        await handleFind(request, stream, kbManager, sessionManagerV2, token);
+                        await handleFind(request, stream, kbManager, token);
                         return { metadata: { command: 'find' } };
 
                     case 'map':

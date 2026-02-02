@@ -1,8 +1,8 @@
 import * as vscode from 'vscode';
 import * as path from 'path';
-import { SessionV2, createSession } from '../../session/SessionV2';
-import { SessionStore } from '../../session/SessionStore';
-import { KnowledgeBaseManager } from '../../knowledgeBase/KnowledgeBaseManager';
+import { SessionV2, createSession } from './SessionV2';
+import { SessionStore } from './SessionStore';
+import { KnowledgeBaseManager } from '../knowledgeBase/KnowledgeBaseManager';
 
 /**
  * Enhanced SessionManager V2
@@ -81,7 +81,7 @@ export class SessionManagerV2 {
         
         // Try to find existing session
         const existing = await this.sessionStore.findByName(name);
-        const workspaceSessions = existing.filter(s => s.workspace === workspacePath);
+        const workspaceSessions = existing.filter((s) => s.workspace === workspacePath);
         
         if (workspaceSessions.length > 0) {
             // Load existing
@@ -130,7 +130,7 @@ export class SessionManagerV2 {
         const workspacePath = workspaceFolders[0].uri.fsPath;
         const sessions = await this.sessionStore.list(workspacePath);
         
-        return sessions.map(s => ({
+        return sessions.map((s) => ({
             id: s.id,
             name: s.name,
             featureCount: s.featureCount,
