@@ -108,14 +108,28 @@ export function registerChatParticipant(
                         return { metadata: { command: 'sessions' } };
 
                     default:
-                        console.log('[AutoForge] Showing help (no command)');
+                        console.log('[AutoForge] No command - processing natural query');
                         
-                        // If context was auto-added, acknowledge it
-                        if (contextAdded) {
-                            stream.markdown(`I've analyzed the current code context. How can I help?\n\n`);
+                        // If context was auto-added and user has a query, help them
+                        if (contextAdded && request.prompt.trim()) {
+                            stream.markdown(`I've added context from your current code. `);
+                            
+                            // Try to search knowledge base for the query
+                            const query = request.prompt.trim();
+                            stream.markdown(`Searching knowledge base for: "${query}"...\n\n`);
+                            
+                            // Delegate to find handler
+                            await handleFind(request, stream, kbManager, token);
+                            
+                            stream.markdown(`\n\n💡 **Next Steps:**\n`);
+                            stream.markdown(`- Use \`@workspace\` to generate code based on this context\n`);
+                            stream.markdown(`- Try \`@autoforge /context\` to see full context details\n`);
+                            stream.markdown(`- Create a session with \`@autoforge /session <name>\` to save this work\n`);
+                            
+                            return { metadata: { command: 'natural-query', contextAdded: true, query } };
                         }
                         
-                        // No command → show help
+                        // No query, just show help
                         stream.markdown(`## 🤖 AutoForge - Context Provider for Copilot\n\n`);
                         stream.markdown(`AutoForge enhances GitHub Copilot with rich codebase context and session management.\n\n`);
                         
