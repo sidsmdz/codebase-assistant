@@ -153,21 +153,28 @@ export class LSPProvider {
                 position
             );
 
-            if (!locations) {
+            if (!locations || locations.length === 0) {
                 return [];
             }
+
+            // Filter out any undefined or invalid entries from LSP
+            const validLocations = locations.filter(loc => loc?.uri && loc?.range);
 
             // Get definition to mark it
             const definitions = await this.getDefinition(uri, position);
             const defSet = new Set(
-                definitions.map(loc => `${loc.uri.toString()}:${loc.range.start.line}:${loc.range.start.character}`)
+                definitions
+                    .filter(loc => loc?.uri && loc?.range)
+                    .map(loc => `${loc.uri.toString()}:${loc.range.start.line}:${loc.range.start.character}`)
             );
 
-            return locations.map(loc => ({
-                uri: loc.uri,
-                range: loc.range,
-                isDefinition: defSet.has(`${loc.uri.toString()}:${loc.range.start.line}:${loc.range.start.character}`)
-            }));
+            return validLocations
+                .filter(loc => loc?.uri && loc?.range)
+                .map(loc => ({
+                    uri: loc.uri,
+                    range: loc.range,
+                    isDefinition: defSet.has(`${loc.uri.toString()}:${loc.range.start.line}:${loc.range.start.character}`)
+                }));
         } catch (error) {
             console.warn('Failed to get references:', error);
             return [];
