@@ -115,6 +115,49 @@ export interface RefactorValidation {
 }
 
 /**
+ * Bridge Verification Result
+ * Validates cross-language synchronization
+ */
+export interface BridgeVerification {
+    status: 'SUCCESS' | 'STRUCTURE_MISMATCH' | 'TYPE_MISMATCH' | 'MISSING_FILE';
+    canProceed: boolean;
+    errors: {
+        severity: 'error' | 'warning';
+        file: string;
+        message: string;
+        details: string;
+    }[];
+    
+    analysis: {
+        javaChanges: ParsedChange[];
+        typescriptChanges: ParsedChange[];
+        missingFields: {
+            field: string;
+            inJava: boolean;
+            inTypeScript: boolean;
+            suggestedFix: string;
+        }[];
+        typeMismatches: {
+            field: string;
+            javaType: string;
+            tsType: string;
+            recommendation: string;
+        }[];
+    };
+    
+    summary: string;
+}
+
+interface ParsedChange {
+    file: string;
+    language: string;
+    className?: string;
+    interfaceName?: string;
+    fields: { name: string; type: string; }[];
+    methods: { name: string; returnType: string; }[];
+}
+
+/**
  * The "Brain" of AutoForge
  * Combines Tree-sitter (structure) + LSP (semantics) + KB (history)
  * to make governance decisions
@@ -255,6 +298,185 @@ export class FeatureGraphProvider {
             affectedFiles,
             strategy
         };
+    }
+
+    /**
+     * TOOL 4: Verify Cross-Language Bridge
+     * Validation Loop: Check generated code BEFORE presenting to user
+     */
+    async verifyBridge(proposedChangesJson: string): Promise<BridgeVerification> {
+        const errors: BridgeVerification['errors'] = [];
+        
+        try {
+            // Parse the proposed changes
+            const proposed = JSON.parse(proposedChangesJson);
+            
+            if (!proposed.files || !Array.isArray(proposed.files)) {
+                return {
+                    status: 'MISSING_FILE',
+                    canProceed: false,
+                    errors: [{
+                        severity: 'error',
+                        file: 'N/A',
+                        message: 'Invalid input format',
+                        details: 'Expected format: {files: [{path: string, language: string, content: string}]}'
+                    }],
+                    analysis: {
+                        javaChanges: [],
+                        typescriptChanges: [],
+                        missingFields: [],
+                        typeMismatches: []
+                    },
+                    summary: 'Invalid input format'
+                };
+            }
+            
+            // Separate Java and TypeScript changes
+            const javaFiles = proposed.files.filter((f: any) => f.language === 'java');
+            const tsFiles = proposed.files.filter((f: any) => f.language === 'typescript' || f.language === 'ts');
+            
+            // Parse Java structures using Tree-sitter
+            const javaChanges: ParsedChange[] = [];
+            for (const file of javaFiles) {
+                const parsed = await this.parseJavaStructure(file.content, file.path);
+                if (parsed) {
+                    javaChanges.push(parsed);
+                }
+            }
+            
+            // Parse TypeScript structures using Tree-sitter
+            const tsChanges: ParsedChange[] = [];
+            for (const file of tsFiles) {
+                const parsed = await this.parseTypeScriptStructure(file.content, file.path);
+                if (parsed) {
+                    tsChanges.push(parsed);
+                }
+            }
+            
+            // Compare structures to find mismatches
+            const missingFields: BridgeVerification['analysis']['missingFields'] = [];
+            const typeMismatches: BridgeVerification['analysis']['typeMismatches'] = [];
+            
+            // For each Java class, find corresponding TypeScript interface
+            for (const javaChange of javaChanges) {
+                const className = javaChange.className || '';
+                // Look for matching TS interface (e.g., UserDTO.java → UserDTO.ts or User.ts)
+                const matchingTS = tsChanges.find(ts => 
+                    ts.interfaceName === className || 
+                    ts.file.includes(className.replace('DTO', ''))
+                );
+                
+                if (!matchingTS) {
+                    errors.push({
+                        severity: 'warning',
+                        file: javaChange.file,
+                        message: `No matching TypeScript interface found for ${className}`,
+                        details: `Consider creating ${className}.ts or updating the corresponding interface`
+                    });
+                    continue;
+                }
+                
+                // Compare fields
+                for (const javaField of javaChange.fields) {
+                    const tsField = matchingTS.fields.find(f => f.name === javaField.name);
+                    
+                    if (!tsField) {
+                        missingFields.push({
+                            field: javaField.name,
+                            inJava: true,
+                            inTypeScript: false,
+                            suggestedFix: `Add '${javaField.name}: ${this.mapJavaTypeToTS(javaField.type)};' to ${matchingTS.file}`
+                        });
+                        
+                        errors.push({
+                            severity: 'error',
+                            file: matchingTS.file,
+                            message: `Missing field '${javaField.name}' in TypeScript interface`,
+                            details: `Java class ${className} has field '${javaField.name}: ${javaField.type}' but TypeScript interface is missing it`
+                        });
+                    } else {
+                        // Check type compatibility
+                        const expectedTSType = this.mapJavaTypeToTS(javaField.type);
+                        if (tsField.type !== expectedTSType && !this.areTypesCompatible(javaField.type, tsField.type)) {
+                            typeMismatches.push({
+                                field: javaField.name,
+                                javaType: javaField.type,
+                                tsType: tsField.type,
+                                recommendation: `Consider changing TypeScript type to '${expectedTSType}'`
+                            });
+                            
+                            errors.push({
+                                severity: 'warning',
+                                file: matchingTS.file,
+                                message: `Type mismatch for field '${javaField.name}'`,
+                                details: `Java: ${javaField.type}, TypeScript: ${tsField.type}. Expected: ${expectedTSType}`
+                            });
+                        }
+                    }
+                }
+                
+                // Check for TS fields not in Java
+                for (const tsField of matchingTS.fields) {
+                    const javaField = javaChange.fields.find(f => f.name === tsField.name);
+                    if (!javaField) {
+                        missingFields.push({
+                            field: tsField.name,
+                            inJava: false,
+                            inTypeScript: true,
+                            suggestedFix: `Add 'private ${this.mapTSTypeToJava(tsField.type)} ${tsField.name};' to ${javaChange.file}`
+                        });
+                        
+                        errors.push({
+                            severity: 'error',
+                            file: javaChange.file,
+                            message: `Missing field '${tsField.name}' in Java class`,
+                            details: `TypeScript interface has field '${tsField.name}: ${tsField.type}' but Java class is missing it`
+                        });
+                    }
+                }
+            }
+            
+            // Determine overall status
+            const hasErrors = errors.some(e => e.severity === 'error');
+            const status: BridgeVerification['status'] = 
+                hasErrors ? (missingFields.length > 0 ? 'STRUCTURE_MISMATCH' : 'TYPE_MISMATCH') : 'SUCCESS';
+            
+            const summary = hasErrors 
+                ? `Verification FAILED: ${errors.filter(e => e.severity === 'error').length} errors, ${errors.filter(e => e.severity === 'warning').length} warnings`
+                : `Verification PASSED: All cross-language structures are synchronized`;
+            
+            return {
+                status,
+                canProceed: !hasErrors,
+                errors,
+                analysis: {
+                    javaChanges,
+                    typescriptChanges: tsChanges,
+                    missingFields,
+                    typeMismatches
+                },
+                summary
+            };
+            
+        } catch (error) {
+            return {
+                status: 'MISSING_FILE',
+                canProceed: false,
+                errors: [{
+                    severity: 'error',
+                    file: 'N/A',
+                    message: 'Failed to parse proposed changes',
+                    details: error instanceof Error ? error.message : String(error)
+                }],
+                analysis: {
+                    javaChanges: [],
+                    typescriptChanges: [],
+                    missingFields: [],
+                    typeMismatches: []
+                },
+                summary: 'Verification failed due to parsing error'
+            };
+        }
     }
 
     // ==================== PRIVATE HELPER METHODS ====================
@@ -696,5 +918,153 @@ export class FeatureGraphProvider {
             ],
             rollbackPlan: 'Git revert'
         };
+    }
+
+    /**
+     * Parse Java class structure from source code
+     */
+    private async parseJavaStructure(content: string, filePath: string): Promise<ParsedChange | null> {
+        try {
+            // Simple regex-based parsing (Tree-sitter parsing would be more robust)
+            const classMatch = content.match(/class\s+(\w+)/);
+            const className = classMatch ? classMatch[1] : undefined;
+            
+            const fields: { name: string; type: string; }[] = [];
+            const fieldRegex = /private\s+(\w+(?:<[\w, ]+>)?)\s+(\w+);/g;
+            let match;
+            while ((match = fieldRegex.exec(content)) !== null) {
+                fields.push({ type: match[1], name: match[2] });
+            }
+            
+            const methods: { name: string; returnType: string; }[] = [];
+            const methodRegex = /public\s+(\w+(?:<[\w, ]+>)?)\s+(\w+)\s*\(/g;
+            while ((match = methodRegex.exec(content)) !== null) {
+                methods.push({ returnType: match[1], name: match[2] });
+            }
+            
+            return {
+                file: filePath,
+                language: 'java',
+                className,
+                fields,
+                methods
+            };
+        } catch (error) {
+            console.error('Failed to parse Java structure:', error);
+            return null;
+        }
+    }
+
+    /**
+     * Parse TypeScript interface structure from source code
+     */
+    private async parseTypeScriptStructure(content: string, filePath: string): Promise<ParsedChange | null> {
+        try {
+            const interfaceMatch = content.match(/interface\s+(\w+)/);
+            const interfaceName = interfaceMatch ? interfaceMatch[1] : undefined;
+            
+            const fields: { name: string; type: string; }[] = [];
+            // Match: fieldName: type; or fieldName?: type;
+            const fieldRegex = /(\w+)\??:\s*([\w<>\[\]]+);/g;
+            let match;
+            while ((match = fieldRegex.exec(content)) !== null) {
+                fields.push({ name: match[1], type: match[2] });
+            }
+            
+            const methods: { name: string; returnType: string; }[] = [];
+            // Match: methodName(): returnType;
+            const methodRegex = /(\w+)\s*\([^)]*\):\s*([\w<>\[\]]+);/g;
+            while ((match = methodRegex.exec(content)) !== null) {
+                methods.push({ name: match[1], returnType: match[2] });
+            }
+            
+            return {
+                file: filePath,
+                language: 'typescript',
+                interfaceName,
+                fields,
+                methods
+            };
+        } catch (error) {
+            console.error('Failed to parse TypeScript structure:', error);
+            return null;
+        }
+    }
+
+    /**
+     * Map Java types to TypeScript equivalents
+     */
+    private mapJavaTypeToTS(javaType: string): string {
+        const typeMap: Record<string, string> = {
+            'String': 'string',
+            'Integer': 'number',
+            'int': 'number',
+            'Long': 'number',
+            'long': 'number',
+            'Double': 'number',
+            'double': 'number',
+            'Float': 'number',
+            'float': 'number',
+            'Boolean': 'boolean',
+            'boolean': 'boolean',
+            'Date': 'Date',
+            'LocalDateTime': 'string',
+            'LocalDate': 'string',
+            'UUID': 'string'
+        };
+        
+        // Handle generics: List<String> → string[]
+        if (javaType.includes('List<') || javaType.includes('Set<')) {
+            const innerType = javaType.match(/<(\w+)>/)?.[1];
+            if (innerType) {
+                return `${this.mapJavaTypeToTS(innerType)}[]`;
+            }
+        }
+        
+        return typeMap[javaType] || 'any';
+    }
+
+    /**
+     * Map TypeScript types to Java equivalents
+     */
+    private mapTSTypeToJava(tsType: string): string {
+        const typeMap: Record<string, string> = {
+            'string': 'String',
+            'number': 'Integer',
+            'boolean': 'Boolean',
+            'Date': 'LocalDateTime'
+        };
+        
+        // Handle arrays: string[] → List<String>
+        if (tsType.endsWith('[]')) {
+            const innerType = tsType.replace('[]', '');
+            return `List<${this.mapTSTypeToJava(innerType)}>`;
+        }
+        
+        return typeMap[tsType] || 'Object';
+    }
+
+    /**
+     * Check if Java and TypeScript types are compatible
+     */
+    private areTypesCompatible(javaType: string, tsType: string): boolean {
+        const expectedTS = this.mapJavaTypeToTS(javaType);
+        
+        // Exact match
+        if (expectedTS === tsType) {
+            return true;
+        }
+        
+        // number can be integer, long, double, etc.
+        if (expectedTS === 'number' && tsType === 'number') {
+            return true;
+        }
+        
+        // string can be Date, UUID, etc.
+        if (expectedTS === 'string' && tsType === 'string') {
+            return true;
+        }
+        
+        return false;
     }
 }

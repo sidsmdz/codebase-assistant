@@ -3,6 +3,7 @@ import { KnowledgeBaseManager } from '../knowledgeBase/KnowledgeBaseManager';
 import { SessionManagerV2 } from '../session/SessionManagerV2';
 import { ContextProvider } from './ContextProvider';
 import { addContextToStream, shouldAddContext } from './utilities/contextHelper';
+import { FeatureGraphProvider } from '../tools/FeatureGraphProvider';
 
 /**
  * CHAT PARTICIPANT V2 - SIMPLIFIED ARCHITECTURE ✨
@@ -29,6 +30,7 @@ import { addContextToStream, shouldAddContext } from './utilities/contextHelper'
  * - Context restoration when switching sessions
  * - Timeline tracking for all interactions
  * - Chat variables for easy context injection
+ * - AUTO IMPACT ANALYSIS: Detects refactor requests and runs analysis automatically
  */
 
 // V2 Handlers - Only 5 essential commands
@@ -42,6 +44,7 @@ export function registerChatParticipant(
     kbManager: KnowledgeBaseManager,
     sessionManagerV2: SessionManagerV2,
     contextProvider: ContextProvider,
+    featureGraphProvider: FeatureGraphProvider,
     onScanComplete?: () => void
 ): vscode.Disposable {
 
@@ -65,6 +68,62 @@ export function registerChatParticipant(
                 console.log('[AutoForge] Auto-adding hybrid context...');
                 await addContextToStream(stream, contextProvider, false);
                 contextAdded = true;
+            }
+            
+            // Auto-run impact analysis for refactor requests
+            const refactorKeywords = /\b(refactor|rename|modify|change|delete|remove)\b/i;
+            if (!request.command && refactorKeywords.test(request.prompt)) {
+                console.log('[AutoForge] Detected refactor request, running impact analysis...');
+                
+                // Extract symbol name (look for PascalCase words)
+                const words = request.prompt.split(/\s+/);
+                let symbolName = '';
+                for (const word of words) {
+                    if (/^[A-Z][a-zA-Z0-9_]*$/.test(word)) {
+                        symbolName = word;
+                        break;
+                    }
+                }
+                
+                if (symbolName) {
+                    try {
+                        stream.markdown(`\n🔍 **Analyzing Impact:** ${symbolName}...\n\n`);
+                        
+                        const impact = await featureGraphProvider.analyzeImpact(symbolName);
+                        
+                        stream.markdown(`### 📊 Impact Analysis\n\n`);
+                        stream.markdown(`**Symbol:** \`${impact.symbolName}\` (${impact.symbolType})\n`);
+                        stream.markdown(`**Location:** \`${impact.location.file.split('/').pop()}:${impact.location.line}\`\n`);
+                        stream.markdown(`**Risk Score:** ${impact.riskScore}/100\n\n`);
+                        
+                        stream.markdown(`**📈 Impact Metrics:**\n`);
+                        stream.markdown(`- ${impact.affectedFiles} files reference this symbol\n`);
+                        stream.markdown(`- ${impact.crossLanguageLinks.length} cross-language dependencies\n`);
+                        stream.markdown(`- Languages affected: ${impact.affectedLanguages.join(', ')}\n\n`);
+                        
+                        stream.markdown(`**${impact.riskScore > 80 ? '⛔' : impact.riskScore > 50 ? '⚠️' : '✅'} Recommendation:**\n`);
+                        stream.markdown(`${impact.recommendation}\n\n`);
+                        
+                        if (impact.references.length > 0) {
+                            stream.markdown(`**🔗 Key References:**\n`);
+                            const topRefs = impact.references.slice(0, 5);
+                            for (const ref of topRefs) {
+                                const fileName = ref.file.split('/').pop();
+                                stream.markdown(`- \`${fileName}:${ref.line}\` (${ref.language})\n`);
+                            }
+                            if (impact.references.length > 5) {
+                                stream.markdown(`- ...and ${impact.references.length - 5} more references\n`);
+                            }
+                            stream.markdown(`\n`);
+                        }
+                        
+                        stream.markdown(`---\n\n`);
+                        stream.markdown(`💡 **Proceeding with this analysis in mind...**\n\n`);
+                        
+                    } catch (error: any) {
+                        stream.markdown(`⚠️ Could not analyze impact: ${error.message}\n\n`);
+                    }
+                }
             }
             
             try {

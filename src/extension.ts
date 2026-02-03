@@ -113,12 +113,12 @@ export async function activate(context: vscode.ExtensionContext) {
     context.subscriptions.push(
         vscode.lm.registerTool('autoforge_findFeature', {
             async invoke(options, token) {
-                const { featureQuery } = options.input as { featureQuery: string };
+                const { query } = options.input as { query: string };
                 
-                console.log(`[AutoForge Tool] findFeature called for: ${featureQuery}`);
+                console.log(`[AutoForge Tool] findFeature called for: ${query}`);
                 
                 try {
-                    const feature = await featureGraphProvider.findFeature(featureQuery);
+                    const feature = await featureGraphProvider.findFeature(query);
                     
                     const result = {
                         summary: `Found feature: ${feature.featureName} (confidence: ${(feature.confidence * 100).toFixed(0)}%)`,
@@ -137,70 +137,63 @@ export async function activate(context: vscode.ExtensionContext) {
                     return new vscode.LanguageModelToolResult([
                         new vscode.LanguageModelTextPart(JSON.stringify({
                             error: error.message,
-                            query: featureQuery
+                            query: query
                         }))
                     ]);
                 }
             },
             
             async prepareInvocation(options, token) {
-                const { featureQuery } = options.input as { featureQuery: string };
+                const { query } = options.input as { query: string };
                 return {
-                    invocationMessage: `🎯 AutoForge is finding feature: "${featureQuery}"...`
+                    invocationMessage: `🎯 AutoForge is finding feature: "${query}"...`
                 };
             }
         })
     );
     
-    // TOOL 3: Validate Refactor
-    // When to use: BEFORE any refactoring operation (Check-Before-Act)
+    // TOOL 3: Verify Cross-Language Bridge
+    // When to use: AFTER generating code but BEFORE presenting to user (Validation Loop)
     context.subscriptions.push(
-        vscode.lm.registerTool('autoforge_validateRefactor', {
+        vscode.lm.registerTool('autoforge_verifyBridge', {
             async invoke(options, token) {
-                const { symbolName, proposedChange } = options.input as { 
-                    symbolName: string; 
-                    proposedChange: string;
+                const { proposedChanges } = options.input as { 
+                    proposedChanges: string;
                 };
                 
-                console.log(`[AutoForge Tool] validateRefactor called for: ${symbolName} -> ${proposedChange}`);
+                console.log(`[AutoForge Tool] verifyBridge called with ${proposedChanges.length} chars of changes`);
                 
                 try {
-                    const validation = await featureGraphProvider.validateRefactor(symbolName, proposedChange);
+                    const verification = await featureGraphProvider.verifyBridge(proposedChanges);
                     
                     const result = {
-                        canProceed: validation.canProceed,
-                        summary: validation.canProceed 
-                            ? `✅ Safe to proceed (${validation.strategy.approach})` 
-                            : `⛔ Blocked: ${validation.blockers.join(', ')}`,
-                        blockers: validation.blockers,
-                        warnings: validation.warnings,
-                        affectedFiles: validation.affectedFiles.length,
-                        strategy: validation.strategy,
-                        fullValidation: validation
+                        status: verification.status,
+                        canProceed: verification.canProceed,
+                        summary: verification.summary,
+                        errors: verification.errors,
+                        missingFields: verification.analysis.missingFields,
+                        typeMismatches: verification.analysis.typeMismatches,
+                        fullVerification: verification
                     };
                     
                     return new vscode.LanguageModelToolResult([
                         new vscode.LanguageModelTextPart(JSON.stringify(result, null, 2))
                     ]);
                 } catch (error: any) {
-                    console.error(`[AutoForge Tool] Error in validateRefactor:`, error);
+                    console.error(`[AutoForge Tool] Error in verifyBridge:`, error);
                     return new vscode.LanguageModelToolResult([
                         new vscode.LanguageModelTextPart(JSON.stringify({
                             error: error.message,
-                            symbolName,
-                            proposedChange
+                            status: 'ERROR',
+                            canProceed: false
                         }))
                     ]);
                 }
             },
             
             async prepareInvocation(options, token) {
-                const { symbolName, proposedChange } = options.input as { 
-                    symbolName: string; 
-                    proposedChange: string;
-                };
                 return {
-                    invocationMessage: `⚖️ AutoForge is validating refactor: ${symbolName} (${proposedChange})...`
+                    invocationMessage: `🔍 AutoForge is verifying cross-language bridge synchronization...`
                 };
             }
         })
@@ -227,7 +220,7 @@ export async function activate(context: vscode.ExtensionContext) {
 
     console.log('Registering chat participant...');
     // Chat participant (@autoforge in Copilot Chat)
-    const participant = registerChatParticipant(context, kbManager, sessionManager, contextProvider, () => {
+    const participant = registerChatParticipant(context, kbManager, sessionManager, contextProvider, featureGraphProvider, () => {
         treeProvider.refresh();
         sessionTreeProvider.refresh();
     });

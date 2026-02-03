@@ -24,7 +24,7 @@
   "activationEvents": [
     "onLanguageModelTool:autoforge_analyzeImpact",
     "onLanguageModelTool:autoforge_findFeature",
-    "onLanguageModelTool:autoforge_validateRefactor"
+    "onLanguageModelTool:autoforge_verifyBridge"
   ],
   "contributes": {
     "languageModelTools": [
@@ -32,13 +32,13 @@
         "name": "autoforge_analyzeImpact",
         "displayName": "Analyze Code Impact",
         "toolReferenceName": "autoforge_analyzeImpact",
-        "modelDescription": "**MANDATORY**: Call this tool FIRST before suggesting ANY code changes when the user wants to: refactor, modify, rename, delete, or change ANY class, interface, function, method, or variable. Extract ONLY the exact symbol name (e.g., from 'refactor PermissionService class' extract 'PermissionService'). This tool performs deep impact analysis using Tree-sitter AST + LSP to find: ALL references (including cross-file), cross-language dependencies (Java↔TypeScript), breaking change risks, and provides a risk score (0-100) with governance recommendations. NEVER suggest changes without calling this first.",
+        "modelDescription": "Use this tool to analyze the structural impact of changing any code symbol (class, method, interface, etc.) before suggesting modifications. It returns a cross-language 'Impact Analysis' that includes: (1) Risk score (0-100) based on usage patterns, (2) List of all files that reference the target symbol across Java/TypeScript/Proto boundaries, (3) Visibility analysis (public/private/protected), (4) Cross-language dependencies that could break if the symbol changes, (5) Concrete recommendation (SAFE/RISKY/REQUIRES_COORDINATION). This tool is essential for detecting breaking changes across the stack and understanding the blast radius of refactoring operations. Use this BEFORE suggesting any refactors to shared interfaces, DTOs, or API endpoints.",
         "inputSchema": {
           "type": "object",
           "properties": {
             "symbolName": {
               "type": "string",
-              "description": "The exact name of the class, interface, function, or method to analyze. Examples: 'PermissionService', 'UserController', 'validatePermission'"
+              "description": "The name of the symbol to analyze (e.g., 'PermissionService', 'UserDTO', 'AuthGuard')"
             }
           },
           "required": ["symbolName"]
@@ -49,37 +49,33 @@
         "name": "autoforge_findFeature",
         "displayName": "Find Feature Implementation",
         "toolReferenceName": "autoforge_findFeature",
-        "modelDescription": "Use this tool when the user asks about a feature using natural language (e.g., 'how do permissions work', 'find authentication', 'explain user management'). This tool maps keywords to actual code locations, finds entry points (Controllers, Hooks, Services), builds call flow graphs across frontend/backend, and returns related symbols. Returns: feature entry points, call flow, cross-language links, and confidence score.",
+        "modelDescription": "Use this tool to analyze the structural relationship between Java and TypeScript features. It returns a cross-language 'Feature Graph' that maps Java API endpoints and DTOs to their corresponding TypeScript interfaces and frontend hooks. This tool combines Tree-sitter AST parsing with LSP semantic analysis to provide ground-truth about how backend features are consumed by the frontend. Essential for understanding business logic flows (permissions, authentication, workflows), detecting architectural patterns, and answering questions like 'How does X work?' or 'Where is Y implemented?'. Use this when the user's question requires understanding feature relationships or when the answer might span multiple languages.",
         "inputSchema": {
           "type": "object",
           "properties": {
-            "featureQuery": {
+            "query": {
               "type": "string",
-              "description": "Natural language description of the feature to find. Examples: 'permissions', 'user authentication', 'payment processing', 'data validation'"
+              "description": "Natural language description of the feature to analyze (e.g., 'user permissions authorization', 'authentication flow', 'payment processing')"
             }
           },
-          "required": ["featureQuery"]
+          "required": ["query"]
         },
         "canBeReferencedInPrompt": true
       },
       {
-        "name": "autoforge_validateRefactor",
-        "displayName": "Validate Refactor Safety",
-        "toolReferenceName": "autoforge_validateRefactor",
-        "modelDescription": "Use this tool BEFORE performing any refactoring operation. This implements the Check-Before-Act pattern: analyzes impact, identifies blockers (high-risk changes), lists warnings (non-blocking concerns), generates affected files with required changes, and provides a safe refactor strategy with rollback plan. Returns: canProceed (boolean), blockers, warnings, affected files, and step-by-step strategy.",
+        "name": "autoforge_verifyBridge",
+        "displayName": "Verify Cross-Language Bridge",
+        "toolReferenceName": "autoforge_verifyBridge",
+        "modelDescription": "Use this tool AFTER generating code but BEFORE presenting it to the user. It validates that any changes to Java DTOs, interfaces, or API contracts are correctly reflected in the TypeScript frontend to prevent runtime errors. Returns structural validation including: (1) Pass/Fail status, (2) Missing field detection (e.g., Java added 'role' field but TypeScript interface doesn't have it), (3) Type mismatch warnings (e.g., Java uses String but TS uses number), (4) Breaking change analysis for shared interfaces. This tool is mandatory for any multi-file change that crosses language boundaries. If verification fails, regenerate the missing parts and re-verify until it passes.",
         "inputSchema": {
           "type": "object",
           "properties": {
-            "symbolName": {
+            "proposedChanges": {
               "type": "string",
-              "description": "The symbol to be refactored. Examples: 'Permission', 'UserService', 'AuthInterceptor'"
-            },
-            "proposedChange": {
-              "type": "string",
-              "description": "Description of the intended change. Examples: 'rename to PermissionManager', 'make method private', 'change return type to Optional'"
+              "description": "The complete code changes as a JSON string with format: {files: [{path: string, language: string, content: string}]}"
             }
           },
-          "required": ["symbolName", "proposedChange"]
+          "required": ["proposedChanges"]
         },
         "canBeReferencedInPrompt": true
       }
