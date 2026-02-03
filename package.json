@@ -28,7 +28,7 @@
         "id": "autoforge.chatParticipant",
         "fullName": "AutoForge",
         "name": "autoforge",
-        "description": "AI assistant enriched with your project's knowledge base — features, components, data flows, and patterns.",
+        "description": "Context provider for GitHub Copilot with rich codebase knowledge and session management.",
         "isSticky": false,
         "commands": [
           {
@@ -36,48 +36,20 @@
             "description": "Index your workspace into the knowledge base"
           },
           {
-            "name": "features",
-            "description": "List all detected features in the knowledge base"
+            "name": "find",
+            "description": "Search knowledge base for features and components"
           },
           {
-            "name": "stats",
-            "description": "Show knowledge base statistics"
-          },
-          {
-            "name": "explain",
-            "description": "Explain selected code or a specific feature/component"
-          },
-          {
-            "name": "reset",
-            "description": "Reset the knowledge base (deletes all indexed data)"
-          },
-          {
-            "name": "analyze",
-            "description": "Analyze selected code to find dependencies, features, and dataflow"
-          },
-          {
-            "name": "trace",
-            "description": "Trace dependencies from selected code or a component name"
-          },
-          {
-            "name": "impact",
-            "description": "Analyze impact of changing selected code, file, or component"
-          },
-          {
-            "name": "sessions",
-            "description": "List all saved conversation sessions"
+            "name": "map",
+            "description": "Visualize architecture, features, and relationships"
           },
           {
             "name": "session",
-            "description": "Switch to or view details of a specific session"
+            "description": "Switch to or create a session with context restoration"
           },
           {
-            "name": "ask",
-            "description": "Ask Copilot to do something with KB context (generate tests, refactor, add feature, etc.)"
-          },
-          {
-            "name": "generate",
-            "description": "Generate code with GitHub Copilot using AutoForge knowledge base context"
+            "name": "sessions",
+            "description": "List all saved sessions with timeline and context"
           }
         ]
       }
