@@ -73,22 +73,36 @@ export class TreeSitterWasmManager {
             return;
         }
 
+        console.log('[TreeSitter] Loading grammars from:', this.extensionPath);
+
         try {
             // Load Java grammar from dist folder (grammars are copied during build)
             const javaWasmPath = path.join(this.extensionPath, 'dist', 'grammars', 'tree-sitter-java.wasm');
+            console.log('[TreeSitter] Loading Java grammar from:', javaWasmPath);
+            
+            // Check if file exists
+            const javaExists = await fs.access(javaWasmPath).then(() => true).catch(() => false);
+            console.log('[TreeSitter] Java grammar file exists:', javaExists);
+            
             this.javaLanguage = await TreeSitter.Language.load(javaWasmPath);
-            console.log('✅ Java grammar loaded');
+            console.log('✅ Java grammar loaded successfully');
         } catch (error) {
-            console.warn('⚠️  Java grammar not available:', error);
+            console.error('❌ Java grammar failed to load:', error);
         }
 
         try {
             // Load TypeScript grammar from dist folder (grammars are copied during build)
             const tsWasmPath = path.join(this.extensionPath, 'dist', 'grammars', 'tree-sitter-typescript.wasm');
+            console.log('[TreeSitter] Loading TypeScript grammar from:', tsWasmPath);
+            
+            // Check if file exists
+            const tsExists = await fs.access(tsWasmPath).then(() => true).catch(() => false);
+            console.log('[TreeSitter] TypeScript grammar file exists:', tsExists);
+            
             this.typescriptLanguage = await TreeSitter.Language.load(tsWasmPath);
-            console.log('✅ TypeScript grammar loaded');
+            console.log('✅ TypeScript grammar loaded successfully');
         } catch (error) {
-            console.warn('⚠️  TypeScript grammar not available:', error);
+            console.error('❌ TypeScript grammar failed to load:', error);
         }
     }
 
