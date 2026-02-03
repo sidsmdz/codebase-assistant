@@ -1,5 +1,37 @@
-import Parser from 'tree-sitter';
+// Try to import tree-sitter, but handle gracefully if native module fails
+let Parser: any;
+let ParserPoint: any;
+let ParserTree: any;
+
+try {
+    const TreeSitter = require('tree-sitter');
+    Parser = TreeSitter;
+    // Define type placeholders for when Parser is available
+    ParserPoint = TreeSitter.Point;
+    ParserTree = TreeSitter.Tree;
+} catch (error) {
+    console.warn('tree-sitter native module not available:', error);
+    Parser = null;
+    ParserPoint = null;
+    ParserTree = null;
+}
+
 import * as vscode from 'vscode';
+
+// Type definitions for when tree-sitter is not available
+interface Point {
+    row: number;
+    column: number;
+}
+
+interface Edit {
+    startIndex: number;
+    oldEndIndex: number;
+    newEndIndex: number;
+    startPosition: Point;
+    oldEndPosition: Point;
+    newEndPosition: Point;
+}
 
 interface ParsedNode {
     type: string;
@@ -19,16 +51,32 @@ interface Relationship {
 }
 
 export class TreeSitterManager {
-    private parser: Parser;
+    private parser: any;
     private javaLanguage: any;
     private typescriptLanguage: any;
-    private cache: Map<string, { tree: Parser.Tree; version: number }> = new Map();
+    private cache: Map<string, { tree: any; version: number }> = new Map();
+    private available: boolean = false;
 
     constructor() {
-        this.parser = new Parser();
+        if (Parser) {
+            try {
+                this.parser = new Parser();
+                this.available = true;
+            } catch (error) {
+                console.warn('Failed to create Parser instance:', error);
+                this.available = false;
+            }
+        } else {
+            this.available = false;
+            console.warn('TreeSitterManager: Parser not available (native module not loaded)');
+        }
     }
 
     async initialize(): Promise<void> {
+        if (!this.available) {
+            throw new Error('Tree-sitter not available (native module failed to load)');
+        }
+        
         try {
             // Dynamically load language parsers
             // Note: tree-sitter languages are loaded differently in different versions
@@ -40,6 +88,7 @@ export class TreeSitterManager {
             this.typescriptLanguage = TypeScriptLanguage;
         } catch (error) {
             console.error('Failed to load tree-sitter languages:', error);
+            this.available = false;
             throw error;
         }
     }
@@ -47,7 +96,10 @@ export class TreeSitterManager {
     /**
      * Parse a file and return the syntax tree
      */
-    async parseFile(filePath: string, content: string, language: 'java' | 'typescript'): Promise<Parser.Tree> {
+    async parseFile(filePath: string, content: string, language: 'java' | 'typescript'): Promise<any> {
+        if (!this.available) {
+            throw new Error('TreeSitterManager not available');
+        }
         // Set the appropriate language
         if (language === 'java') {
             this.parser.setLanguage(this.javaLanguage);
@@ -71,8 +123,8 @@ export class TreeSitterManager {
         filePath: string, 
         content: string, 
         language: 'java' | 'typescript',
-        changes?: Array<{ startIndex: number; oldEndIndex: number; newEndIndex: number; startPosition: Parser.Point; oldEndPosition: Parser.Point; newEndPosition: Parser.Point }>
-    ): Promise<Parser.Tree> {
+        changes?: Array<Edit>
+    ): Promise<any> {
         const cached = this.cache.get(filePath);
         
         if (cached && changes) {
@@ -308,15 +360,15 @@ export class TreeSitterManager {
     }
 
     // Helper methods
-    private traverse(node: Parser.SyntaxNode, callback: (node: Parser.SyntaxNode) => void): void {
+    private traverse(node: any, callback: (node: any) => void): void {
         callback(node);
         for (let i = 0; i < node.childCount; i++) {
             this.traverse(node.child(i)!, callback);
         }
     }
 
-    private findNodes(node: Parser.SyntaxNode, types: string[]): Parser.SyntaxNode[] {
-        const results: Parser.SyntaxNode[] = [];
+    private findNodes(node: any, types: string[]): any[] {
+        const results: any[] = [];
         this.traverse(node, (n) => {
             if (types.includes(n.type)) {
                 results.push(n);
@@ -325,7 +377,7 @@ export class TreeSitterManager {
         return results;
     }
 
-    private findChildByType(node: Parser.SyntaxNode, type: string): Parser.SyntaxNode | null {
+    private findChildByType(node: any, type: string): any | null {
         for (let i = 0; i < node.childCount; i++) {
             const child = node.child(i);
             if (child && child.type === type) {
@@ -335,28 +387,28 @@ export class TreeSitterManager {
         return null;
     }
 
-    private getNodeText(node: Parser.SyntaxNode, content: string): string {
+    private getNodeText(node: any, content: string): string {
         return content.substring(node.startIndex, node.endIndex);
     }
 
-    private getClassName(node: Parser.SyntaxNode, content: string): string {
+    private getClassName(node: any, content: string): string {
         const nameNode = this.findChildByType(node, 'identifier');
         return nameNode ? this.getNodeText(nameNode, content) : 'Unknown';
     }
 
-    private getMethodName(node: Parser.SyntaxNode, content: string): string {
+    private getMethodName(node: any, content: string): string {
         const nameNode = this.findChildByType(node, 'identifier') || 
                          this.findChildByType(node, 'property_identifier');
         return nameNode ? this.getNodeText(nameNode, content) : 'Unknown';
     }
 
-    private getTypeName(node: Parser.SyntaxNode, content: string): string {
+    private getTypeName(node: any, content: string): string {
         const nameNode = this.findChildByType(node, 'type_identifier') ||
                          this.findChildByType(node, 'identifier');
         return nameNode ? this.getNodeText(nameNode, content) : 'Unknown';
     }
 
-    private getCreatedType(node: Parser.SyntaxNode, content: string): string {
+    private getCreatedType(node: any, content: string): string {
         const typeNode = this.findChildByType(node, 'type_identifier') ||
                         this.findChildByType(node, 'identifier');
         return typeNode ? this.getNodeText(typeNode, content) : 'Unknown';

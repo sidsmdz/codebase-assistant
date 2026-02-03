@@ -2,11 +2,34 @@ import * as vscode from 'vscode';
 import * as path from 'path';
 import * as fs from 'fs';
 import { Database } from 'sql.js';
-import { LSIFManager } from '../indexing/LSIFManager';
-import { LSIFGenerator } from '../indexing/LSIFGenerator';
-import { TreeSitterManager } from '../parsers/TreeSitterManager';
 import { RelationshipIndexer } from '../indexing/RelationshipIndexer';
 import { RelationshipSearch, RelatedEntity, DataFlowPath as SearchDataFlowPath } from '../search/RelationshipSearch';
+
+// Optional imports - fail gracefully if native modules are not available
+let LSIFManager: any;
+let LSIFGenerator: any;
+let TreeSitterManager: any;
+
+try {
+    const lsifManagerModule = require('../indexing/LSIFManager');
+    LSIFManager = lsifManagerModule.LSIFManager;
+} catch (error) {
+    console.warn('LSIFManager not available:', error);
+}
+
+try {
+    const lsifGeneratorModule = require('../indexing/LSIFGenerator');
+    LSIFGenerator = lsifGeneratorModule.LSIFGenerator;
+} catch (error) {
+    console.warn('LSIFGenerator not available:', error);
+}
+
+try {
+    const treeSitterModule = require('../parsers/TreeSitterManager');
+    TreeSitterManager = treeSitterModule.TreeSitterManager;
+} catch (error) {
+    console.warn('TreeSitterManager not available (native module):', error);
+}
 
 interface Relationship {
     sourceEntity: string;
@@ -24,28 +47,57 @@ interface QueryOptions {
 }
 
 export class HybridKnowledgeBase {
-    private lsifManager: LSIFManager;
-    private lsifGenerator: LSIFGenerator;
-    private treeSitterManager: TreeSitterManager;
+    private lsifManager: any;
+    private lsifGenerator: any;
+    private treeSitterManager: any;
     private relationshipIndexer: RelationshipIndexer;
     private relationshipSearch: RelationshipSearch;
     
     private lsifLoaded: boolean = false;
     private lsifCoverage: Set<string> = new Set(); // Files covered by LSIF
     private treeSitterCache: Map<string, { timestamp: number; relationships: Relationship[] }> = new Map();
+    private hybridFeaturesAvailable: boolean = false;
 
     constructor(private db: Database) {
-        this.lsifManager = new LSIFManager();
-        this.lsifGenerator = new LSIFGenerator({
-            autoGenerate: true,
-            generateOnStartup: false,
-            generateOnBuild: true,
-            outputPath: 'lsif-output',
-            incrementalUpdate: true
-        });
-        this.treeSitterManager = new TreeSitterManager();
+        // Initialize optional features if available
+        if (LSIFManager) {
+            try {
+                this.lsifManager = new LSIFManager();
+            } catch (error) {
+                console.warn('Failed to initialize LSIFManager:', error);
+            }
+        }
+        
+        if (LSIFGenerator) {
+            try {
+                this.lsifGenerator = new LSIFGenerator({
+                    autoGenerate: true,
+                    generateOnStartup: false,
+                    generateOnBuild: true,
+                    outputPath: 'lsif-output',
+                    incrementalUpdate: true
+                });
+            } catch (error) {
+                console.warn('Failed to initialize LSIFGenerator:', error);
+            }
+        }
+        
+        if (TreeSitterManager) {
+            try {
+                this.treeSitterManager = new TreeSitterManager();
+            } catch (error) {
+                console.warn('Failed to initialize TreeSitterManager:', error);
+            }
+        }
+        
         this.relationshipIndexer = new RelationshipIndexer(db);
         this.relationshipSearch = new RelationshipSearch(db);
+        
+        this.hybridFeaturesAvailable = !!(this.lsifManager || this.treeSitterManager);
+        
+        if (!this.hybridFeaturesAvailable) {
+            console.log('⚠️  Hybrid KB features (LSIF/Tree-sitter) not available. Extension will use basic indexing only.');
+        }
     }
 
     /**
@@ -54,17 +106,44 @@ export class HybridKnowledgeBase {
     async initialize(): Promise<void> {
         console.log('Initializing Hybrid Knowledge Base...');
         
-        // Initialize tree-sitter
-        await this.treeSitterManager.initialize();
+        if (!this.hybridFeaturesAvailable) {
+            console.log('Hybrid features not available, skipping advanced initialization');
+            return;
+        }
         
-        // Initialize LSIF generator
-        const workspaceFolders = vscode.workspace.workspaceFolders;
-        if (workspaceFolders && workspaceFolders.length > 0) {
-            await this.lsifGenerator.initialize(workspaceFolders[0]);
+        // Initialize tree-sitter if available
+        if (this.treeSitterManager) {
+            try {
+                await this.treeSitterManager.initialize();
+                console.log('✅ Tree-sitter initialized');
+            } catch (error) {
+                console.warn('Tree-sitter initialization failed:', error);
+                this.treeSitterManager = null;
+            }
+        }
+        
+        // Initialize LSIF generator if available
+        if (this.lsifGenerator) {
+            try {
+                const workspaceFolders = vscode.workspace.workspaceFolders;
+                if (workspaceFolders && workspaceFolders.length > 0) {
+                    await this.lsifGenerator.initialize(workspaceFolders[0]);
+                    console.log('✅ LSIF generator initialized');
+                }
+            } catch (error) {
+                console.warn('LSIF generator initialization failed:', error);
+                this.lsifGenerator = null;
+            }
         }
         
         // Try to load existing LSIF or generate new one
-        await this.ensureLSIF();
+        if (this.lsifManager) {
+            try {
+                await this.ensureLSIF();
+            } catch (error) {
+                console.warn('LSIF loading failed:', error);
+            }
+        }
         
         console.log(`Hybrid KB initialized. LSIF loaded: ${this.lsifLoaded}, Coverage: ${this.lsifCoverage.size} files`);
     }
@@ -373,7 +452,7 @@ export class HybridKnowledgeBase {
             const callees = callGraph.get(methodName);
             
             if (callees) {
-                return callees.map(callee => ({
+                return callees.map((callee: string) => ({
                     sourceEntity: methodName,
                     targetEntity: callee,
                     relationType: 'CALLS',
