@@ -8,10 +8,12 @@ import { SessionTreeProvider } from './sessionTreeProvider';
 import { ContextProvider } from './chatParticipant/ContextProvider';
 import { TreeSitterWasmManager } from './parsers/TreeSitterWasmManager';
 import { LSPProvider } from './indexing/LSPProvider';
+import { FeatureGraphProvider } from './tools/FeatureGraphProvider';
 
 let kbManager: KnowledgeBaseManager;
 let sessionManager: SessionManagerV2;
 let contextProvider: ContextProvider;
+let featureGraphProvider: FeatureGraphProvider;
 
 export async function activate(context: vscode.ExtensionContext) {
     console.log('AutoForge extension activating...');
@@ -36,6 +38,165 @@ export async function activate(context: vscode.ExtensionContext) {
     const lspProvider = new LSPProvider();
     contextProvider = new ContextProvider(treeSitter, lspProvider);
     console.log('Context Provider initialized');
+
+    console.log('Initializing Feature Graph Provider (Decision Engine)...');
+    featureGraphProvider = new FeatureGraphProvider(treeSitter, lspProvider, kbManager);
+    console.log('Feature Graph Provider initialized');
+
+    // ==================== LANGUAGE MODEL TOOLS REGISTRATION ====================
+    // These tools allow @workspace to query AutoForge autonomously
+    
+    console.log('Registering Language Model Tools...');
+    
+    // TOOL 1: Analyze Impact
+    // When to use: Before modifying/refactoring/deleting any symbol
+    context.subscriptions.push(
+        vscode.lm.registerTool('autoforge_analyzeImpact', {
+            async invoke(options, token) {
+                const { symbolName } = options.input as { symbolName: string };
+                
+                console.log(`[AutoForge Tool] analyzeImpact called for: ${symbolName}`);
+                
+                try {
+                    const impact = await featureGraphProvider.analyzeImpact(symbolName);
+                    
+                    // Format as structured JSON for LLM
+                    const result = {
+                        summary: `${impact.symbolName} (${impact.symbolType}) has ${impact.affectedFiles} references across ${impact.affectedLanguages.join(', ')}`,
+                        riskScore: impact.riskScore,
+                        recommendation: impact.recommendation,
+                        details: {
+                            location: impact.location,
+                            structure: impact.structure,
+                            references: impact.references.length,
+                            crossLanguageLinks: impact.crossLanguageLinks.length
+                        },
+                        fullAnalysis: impact
+                    };
+                    
+                    return new vscode.LanguageModelToolResult([
+                        new vscode.LanguageModelTextPart(JSON.stringify(result, null, 2))
+                    ]);
+                } catch (error: any) {
+                    console.error(`[AutoForge Tool] Error in analyzeImpact:`, error);
+                    return new vscode.LanguageModelToolResult([
+                        new vscode.LanguageModelTextPart(JSON.stringify({
+                            error: error.message,
+                            symbolName
+                        }))
+                    ]);
+                }
+            },
+            
+            async prepareInvocation(options, token) {
+                const { symbolName } = options.input as { symbolName: string };
+                return {
+                    invocationMessage: `🔍 AutoForge is analyzing impact of: ${symbolName}...`
+                };
+            }
+        })
+    );
+    
+    // TOOL 2: Find Feature
+    // When to use: User asks about features in natural language
+    context.subscriptions.push(
+        vscode.lm.registerTool('autoforge_findFeature', {
+            async invoke(options, token) {
+                const { featureQuery } = options.input as { featureQuery: string };
+                
+                console.log(`[AutoForge Tool] findFeature called for: ${featureQuery}`);
+                
+                try {
+                    const feature = await featureGraphProvider.findFeature(featureQuery);
+                    
+                    const result = {
+                        summary: `Found feature: ${feature.featureName} (confidence: ${(feature.confidence * 100).toFixed(0)}%)`,
+                        entryPoints: feature.entryPoints,
+                        keywords: feature.keywords,
+                        relatedSymbols: feature.relatedSymbols,
+                        confidence: feature.confidence,
+                        fullGraph: feature
+                    };
+                    
+                    return new vscode.LanguageModelToolResult([
+                        new vscode.LanguageModelTextPart(JSON.stringify(result, null, 2))
+                    ]);
+                } catch (error: any) {
+                    console.error(`[AutoForge Tool] Error in findFeature:`, error);
+                    return new vscode.LanguageModelToolResult([
+                        new vscode.LanguageModelTextPart(JSON.stringify({
+                            error: error.message,
+                            query: featureQuery
+                        }))
+                    ]);
+                }
+            },
+            
+            async prepareInvocation(options, token) {
+                const { featureQuery } = options.input as { featureQuery: string };
+                return {
+                    invocationMessage: `🎯 AutoForge is finding feature: "${featureQuery}"...`
+                };
+            }
+        })
+    );
+    
+    // TOOL 3: Validate Refactor
+    // When to use: BEFORE any refactoring operation (Check-Before-Act)
+    context.subscriptions.push(
+        vscode.lm.registerTool('autoforge_validateRefactor', {
+            async invoke(options, token) {
+                const { symbolName, proposedChange } = options.input as { 
+                    symbolName: string; 
+                    proposedChange: string;
+                };
+                
+                console.log(`[AutoForge Tool] validateRefactor called for: ${symbolName} -> ${proposedChange}`);
+                
+                try {
+                    const validation = await featureGraphProvider.validateRefactor(symbolName, proposedChange);
+                    
+                    const result = {
+                        canProceed: validation.canProceed,
+                        summary: validation.canProceed 
+                            ? `✅ Safe to proceed (${validation.strategy.approach})` 
+                            : `⛔ Blocked: ${validation.blockers.join(', ')}`,
+                        blockers: validation.blockers,
+                        warnings: validation.warnings,
+                        affectedFiles: validation.affectedFiles.length,
+                        strategy: validation.strategy,
+                        fullValidation: validation
+                    };
+                    
+                    return new vscode.LanguageModelToolResult([
+                        new vscode.LanguageModelTextPart(JSON.stringify(result, null, 2))
+                    ]);
+                } catch (error: any) {
+                    console.error(`[AutoForge Tool] Error in validateRefactor:`, error);
+                    return new vscode.LanguageModelToolResult([
+                        new vscode.LanguageModelTextPart(JSON.stringify({
+                            error: error.message,
+                            symbolName,
+                            proposedChange
+                        }))
+                    ]);
+                }
+            },
+            
+            async prepareInvocation(options, token) {
+                const { symbolName, proposedChange } = options.input as { 
+                    symbolName: string; 
+                    proposedChange: string;
+                };
+                return {
+                    invocationMessage: `⚖️ AutoForge is validating refactor: ${symbolName} (${proposedChange})...`
+                };
+            }
+        })
+    );
+    
+    console.log('Language Model Tools registered');
+    // ==================== END TOOLS REGISTRATION ====================
 
     // Sidebar tree view for KB browsing
     const treeProvider = new KBTreeProvider(kbManager);
