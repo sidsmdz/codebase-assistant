@@ -302,6 +302,7 @@
     "sql.js": "^1.10.3",
     "tree-sitter": "^0.21.0",
     "tree-sitter-java": "^0.21.0",
-    "tree-sitter-typescript": "^0.21.0"
+    "tree-sitter-typescript": "^0.21.0",
+    "web-tree-sitter": "^0.26.5"
   }
 }

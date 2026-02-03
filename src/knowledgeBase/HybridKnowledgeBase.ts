@@ -5,10 +5,10 @@ import { Database } from 'sql.js';
 import { RelationshipIndexer } from '../indexing/RelationshipIndexer';
 import { RelationshipSearch, RelatedEntity, DataFlowPath as SearchDataFlowPath } from '../search/RelationshipSearch';
 
-// Optional imports - fail gracefully if native modules are not available
+// Optional imports - fail gracefully if modules are not available
 let LSIFManager: any;
 let LSIFGenerator: any;
-let TreeSitterManager: any;
+let TreeSitterWasmManager: any;
 
 try {
     const lsifManagerModule = require('../indexing/LSIFManager');
@@ -25,10 +25,10 @@ try {
 }
 
 try {
-    const treeSitterModule = require('../parsers/TreeSitterManager');
-    TreeSitterManager = treeSitterModule.TreeSitterManager;
+    const wasmModule = require('../parsers/TreeSitterWasmManager');
+    TreeSitterWasmManager = wasmModule.TreeSitterWasmManager;
 } catch (error) {
-    console.warn('TreeSitterManager not available (native module):', error);
+    console.warn('TreeSitterWasmManager not available:', error);
 }
 
 interface Relationship {
@@ -82,11 +82,11 @@ export class HybridKnowledgeBase {
             }
         }
         
-        if (TreeSitterManager) {
+        if (TreeSitterWasmManager) {
             try {
-                this.treeSitterManager = new TreeSitterManager();
+                this.treeSitterManager = new TreeSitterWasmManager();
             } catch (error) {
-                console.warn('Failed to initialize TreeSitterManager:', error);
+                console.warn('Failed to initialize TreeSitterWasmManager:', error);
             }
         }
         
@@ -96,7 +96,7 @@ export class HybridKnowledgeBase {
         this.hybridFeaturesAvailable = !!(this.lsifManager || this.treeSitterManager);
         
         if (!this.hybridFeaturesAvailable) {
-            console.log('⚠️  Hybrid KB features (LSIF/Tree-sitter) not available. Extension will use basic indexing only.');
+            console.log('⚠️  Hybrid KB features (LSIF/Tree-sitter WASM) not available. Extension will use basic indexing only.');
         }
     }
 
@@ -111,13 +111,17 @@ export class HybridKnowledgeBase {
             return;
         }
         
-        // Initialize tree-sitter if available
+        // Initialize tree-sitter WASM if available
         if (this.treeSitterManager) {
             try {
                 await this.treeSitterManager.initialize();
-                console.log('✅ Tree-sitter initialized');
+                // Try to load language grammars (these are optional)
+                await this.treeSitterManager.loadLanguages().catch((err: any) => {
+                    console.warn('Some language grammars not available:', err);
+                });
+                console.log('✅ Tree-sitter WASM initialized');
             } catch (error) {
-                console.warn('Tree-sitter initialization failed:', error);
+                console.warn('Tree-sitter WASM initialization failed:', error);
                 this.treeSitterManager = null;
             }
         }
