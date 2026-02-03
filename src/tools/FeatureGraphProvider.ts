@@ -131,11 +131,20 @@ export class FeatureGraphProvider {
      * Find all dependencies and breaking change risks for a symbol
      */
     async analyzeImpact(symbolName: string): Promise<ImpactAnalysis> {
+        console.log(`[AutoForge] Analyzing impact for: ${symbolName}`);
+        
         // Step 1: Find the symbol in workspace
         const symbolLocation = await this.findSymbolLocation(symbolName);
         if (!symbolLocation) {
-            throw new Error(`Symbol "${symbolName}" not found in workspace`);
+            // Provide helpful error with search strategies tried
+            const searchHint = `Tried: LSP workspace search, file pattern matching (${symbolName}.java, ${symbolName}.ts), active editor`;
+            throw new Error(
+                `Symbol "${symbolName}" not found in workspace. ${searchHint}. ` +
+                `Make sure the file is opened or indexed by the language server.`
+            );
         }
+
+        console.log(`[AutoForge] Found ${symbolName} at: ${symbolLocation.file}:${symbolLocation.line}`);
 
         // Step 2: Get AST structure
         const structure = await this.extractStructure(symbolLocation);
@@ -255,27 +264,67 @@ export class FeatureGraphProvider {
         line: number;
         language: string;
     } | null> {
-        // Use LSP workspace symbol search
+        // Strategy 1: Use LSP workspace symbol search
         const symbols = await vscode.commands.executeCommand<vscode.SymbolInformation[]>(
             'vscode.executeWorkspaceSymbolProvider',
             symbolName
         );
 
-        if (!symbols || symbols.length === 0) {
-            return null;
+        if (symbols && symbols.length > 0) {
+            // Find exact match
+            const exactMatch = symbols.find(s => s.name === symbolName);
+            const symbol = exactMatch || symbols[0];
+
+            const doc = await vscode.workspace.openTextDocument(symbol.location.uri);
+
+            return {
+                file: doc.uri.fsPath,
+                line: symbol.location.range.start.line,
+                language: doc.languageId
+            };
         }
 
-        // Find exact match
-        const exactMatch = symbols.find(s => s.name === symbolName);
-        const symbol = exactMatch || symbols[0];
+        // Strategy 2: Search workspace files by name pattern
+        console.log(`[AutoForge] LSP search failed, trying file search for: ${symbolName}`);
+        const javaFiles = await vscode.workspace.findFiles(`**/${symbolName}.java`, '**/node_modules/**', 10);
+        const tsFiles = await vscode.workspace.findFiles(`**/${symbolName}.ts`, '**/node_modules/**', 10);
+        const allFiles = [...javaFiles, ...tsFiles];
 
-        const doc = await vscode.workspace.openTextDocument(symbol.location.uri);
+        if (allFiles.length > 0) {
+            const file = allFiles[0];
+            const doc = await vscode.workspace.openTextDocument(file);
+            
+            // Find class/interface declaration line
+            const text = doc.getText();
+            const classMatch = text.match(new RegExp(`(class|interface)\\s+${symbolName}\\b`));
+            const line = classMatch ? doc.positionAt(text.indexOf(classMatch[0])).line : 0;
 
-        return {
-            file: doc.uri.fsPath,
-            line: symbol.location.range.start.line,
-            language: doc.languageId
-        };
+            console.log(`[AutoForge] Found ${symbolName} via file search at: ${file.fsPath}`);
+            
+            return {
+                file: doc.uri.fsPath,
+                line,
+                language: doc.languageId
+            };
+        }
+
+        // Strategy 3: Search in active editor
+        const activeEditor = vscode.window.activeTextEditor;
+        if (activeEditor) {
+            const text = activeEditor.document.getText();
+            const symbolMatch = text.match(new RegExp(`(class|interface|function)\\s+${symbolName}\\b`));
+            if (symbolMatch) {
+                console.log(`[AutoForge] Found ${symbolName} in active editor`);
+                return {
+                    file: activeEditor.document.uri.fsPath,
+                    line: activeEditor.document.positionAt(text.indexOf(symbolMatch[0])).line,
+                    language: activeEditor.document.languageId
+                };
+            }
+        }
+
+        console.error(`[AutoForge] Symbol not found: ${symbolName}`);
+        return null;
     }
 
     private async extractStructure(location: { file: string; line: number; language: string }): Promise<{
