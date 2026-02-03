@@ -1,0 +1,1 @@
+Created a TypeScript interface and class for PermissionService to align with the Java implementation.

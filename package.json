@@ -1,7 +1,7 @@
 {
   "name": "autoforge",
-  "displayName": "AutoForge",
-  "description": "AI code assistant with codebase knowledge base — Copilot Chat participant",
+  "displayName": "AutoForge - Decision Engine",
+  "description": "Language Model Tools for AI-Assisted Development - Ground-truth AST/LSP analysis for @workspace: impact analysis, feature discovery, cross-language verification",
   "version": "0.3.0",
   "publisher": "your-company",
   "engines": {
