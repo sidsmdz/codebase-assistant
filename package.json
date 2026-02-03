@@ -21,14 +21,18 @@
   "extensionDependencies": [
     "github.copilot-chat"
   ],
-  "activationEvents": [],
+  "activationEvents": [
+    "onLanguageModelTool:autoforge_analyzeImpact",
+    "onLanguageModelTool:autoforge_findFeature",
+    "onLanguageModelTool:autoforge_validateRefactor"
+  ],
   "contributes": {
     "languageModelTools": [
       {
         "name": "autoforge_analyzeImpact",
         "displayName": "Analyze Code Impact",
         "toolReferenceName": "autoforge_analyzeImpact",
-        "modelDescription": "Use this tool WHENEVER the user wants to modify, refactor, or delete a class, interface, function, or method. CRITICAL: Extract ONLY the exact class/function name from the user's request (e.g., 'refactor PermissionService' → symbolName: 'PermissionService', NOT 'refactor PermissionService'). This tool finds all dependencies and potential breaking changes using Tree-sitter AST analysis and LSP cross-file references. Returns: symbol structure, all references, cross-language dependencies (Java↔TypeScript), risk score (0-100), and governance recommendation. Use BEFORE making changes to understand impact.",
+        "modelDescription": "**MANDATORY**: Call this tool FIRST before suggesting ANY code changes when the user wants to: refactor, modify, rename, delete, or change ANY class, interface, function, method, or variable. Extract ONLY the exact symbol name (e.g., from 'refactor PermissionService class' extract 'PermissionService'). This tool performs deep impact analysis using Tree-sitter AST + LSP to find: ALL references (including cross-file), cross-language dependencies (Java↔TypeScript), breaking change risks, and provides a risk score (0-100) with governance recommendations. NEVER suggest changes without calling this first.",
         "inputSchema": {
           "type": "object",
           "properties": {
