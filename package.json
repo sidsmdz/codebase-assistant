@@ -27,6 +27,7 @@
       {
         "name": "autoforge_analyzeImpact",
         "displayName": "Analyze Code Impact",
+        "toolReferenceName": "autoforge_analyzeImpact",
         "modelDescription": "Use this tool WHENEVER the user wants to modify, refactor, or delete a class, interface, function, or method. This tool finds all dependencies and potential breaking changes using Tree-sitter AST analysis and LSP cross-file references. Returns: symbol structure, all references, cross-language dependencies (Java↔TypeScript), risk score (0-100), and governance recommendation. Use BEFORE making changes to understand impact.",
         "inputSchema": {
           "type": "object",
@@ -43,6 +44,7 @@
       {
         "name": "autoforge_findFeature",
         "displayName": "Find Feature Implementation",
+        "toolReferenceName": "autoforge_findFeature",
         "modelDescription": "Use this tool when the user asks about a feature using natural language (e.g., 'how do permissions work', 'find authentication', 'explain user management'). This tool maps keywords to actual code locations, finds entry points (Controllers, Hooks, Services), builds call flow graphs across frontend/backend, and returns related symbols. Returns: feature entry points, call flow, cross-language links, and confidence score.",
         "inputSchema": {
           "type": "object",
@@ -59,6 +61,7 @@
       {
         "name": "autoforge_validateRefactor",
         "displayName": "Validate Refactor Safety",
+        "toolReferenceName": "autoforge_validateRefactor",
         "modelDescription": "Use this tool BEFORE performing any refactoring operation. This implements the Check-Before-Act pattern: analyzes impact, identifies blockers (high-risk changes), lists warnings (non-blocking concerns), generates affected files with required changes, and provides a safe refactor strategy with rollback plan. Returns: canProceed (boolean), blockers, warnings, affected files, and step-by-step strategy.",
         "inputSchema": {
           "type": "object",
