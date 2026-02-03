@@ -102,6 +102,13 @@ export class KnowledgeBaseManager {
         }
     }
 
+    /**
+     * Get the database instance (for LSP indexer and other components)
+     */
+    getDatabase(): Database {
+        return this.db;
+    }
+
     private async createTables(): Promise<void> {
         // Patterns table (unchanged)
         this.db.run(`
@@ -247,6 +254,33 @@ export class KnowledgeBaseManager {
             );
         `);
 
+        // LSP Semantic Symbols table (NEW - for LSP-based semantic indexing)
+        this.db.run(`
+            CREATE TABLE IF NOT EXISTS lsp_symbols (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT NOT NULL,
+                kind TEXT NOT NULL,
+                file_path TEXT NOT NULL,
+                line INTEGER NOT NULL,
+                character INTEGER NOT NULL,
+                container_name TEXT,
+                UNIQUE(name, file_path, line, character)
+            );
+        `);
+
+        // LSP References table (NEW - for symbol references)
+        this.db.run(`
+            CREATE TABLE IF NOT EXISTS lsp_references (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                symbol_id INTEGER NOT NULL,
+                file_path TEXT NOT NULL,
+                line INTEGER NOT NULL,
+                character INTEGER NOT NULL,
+                is_definition INTEGER DEFAULT 0,
+                FOREIGN KEY(symbol_id) REFERENCES lsp_symbols(id) ON DELETE CASCADE
+            );
+        `);
+
         // Create indexes for faster searching
         this.db.run(`CREATE INDEX IF NOT EXISTS idx_patterns_name ON patterns(name);`);
         this.db.run(`CREATE INDEX IF NOT EXISTS idx_patterns_language ON patterns(language);`);
@@ -257,6 +291,9 @@ export class KnowledgeBaseManager {
         this.db.run(`CREATE INDEX IF NOT EXISTS idx_component_type ON feature_components(component_type);`);
         this.db.run(`CREATE INDEX IF NOT EXISTS idx_component_language ON feature_components(language);`);
         this.db.run(`CREATE INDEX IF NOT EXISTS idx_feature_name ON features(name);`);
+        this.db.run(`CREATE INDEX IF NOT EXISTS idx_lsp_symbol_name ON lsp_symbols(name);`);
+        this.db.run(`CREATE INDEX IF NOT EXISTS idx_lsp_symbol_file ON lsp_symbols(file_path);`);
+        this.db.run(`CREATE INDEX IF NOT EXISTS idx_lsp_ref_symbol ON lsp_references(symbol_id);`);
 
         // Run migrations for existing databases
         this.runMigrations();

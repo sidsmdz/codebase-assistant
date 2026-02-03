@@ -3,23 +3,32 @@ import * as fs from 'fs/promises';
 import * as path from 'path';
 import * as crypto from 'crypto';
 import { KnowledgeBaseManager } from './knowledgeBase/KnowledgeBaseManager';
-import { JavaASTParser } from './parsers/JavaASTParser';
-import { TypeScriptASTParser } from './parsers/TypeScriptASTParser';
+import { TreeSitterParser } from './parsers/TreeSitterParser';
+import { LSPIndexer } from './indexing/LSPIndexer';
 import { ASTNode } from './parsers/ASTParser';
 import { FeatureAnalyzer } from './analysis/FeatureAnalyzer';
 import { ModuleDetector } from './analysis/ModuleDetector';
 
+/**
+ * Modern Ingestion Service using Tree-sitter + LSP
+ * Completely rewritten for accuracy and performance
+ */
 export class IngestionService {
-    private javaParser: JavaASTParser;
-    private tsParser: TypeScriptASTParser;
-    private jsParser: TypeScriptASTParser;
+    private treeSitterParser: TreeSitterParser;
+    private lspIndexer: LSPIndexer;
     private featureAnalyzer: FeatureAnalyzer;
     private moduleDetector: ModuleDetector;
 
     constructor(private kbManager: KnowledgeBaseManager) {
-        this.javaParser = new JavaASTParser();
-        this.tsParser = new TypeScriptASTParser(true);  // TypeScript
-        this.jsParser = new TypeScriptASTParser(false); // JavaScript
+        const extensionPath = vscode.extensions.getExtension('your-company.autoforge')?.extensionPath || '';
+        
+        // Initialize with tree-sitter (replaces old custom parsers)
+        this.treeSitterParser = new TreeSitterParser(extensionPath);
+        
+        // Initialize LSP indexer for semantic enrichment
+        this.lspIndexer = new LSPIndexer(kbManager.getDatabase());
+        
+        // Keep existing analyzers
         this.featureAnalyzer = new FeatureAnalyzer();
         this.moduleDetector = new ModuleDetector();
     }
@@ -27,10 +36,12 @@ export class IngestionService {
     async runIngestion() {
         await vscode.window.withProgress({
             location: vscode.ProgressLocation.Notification,
-            title: "AutoForge: Indexing workspace with AST + BM25...",
+            title: "AutoForge: Indexing with Tree-sitter + LSP...",
             cancellable: true
         }, async (progress, token) => {
 
+            progress.report({ message: "Phase 1: Structural parsing with tree-sitter..." });
+            
             const patterns = [
                 '**/*.java',
                 '**/*.ts',
@@ -40,7 +51,6 @@ export class IngestionService {
             ];
 
             // Find all files
-            progress.report({ message: "Finding files..." });
             let allFiles: vscode.Uri[] = [];
             for (const pattern of patterns) {
                 const files = await vscode.workspace.findFiles(pattern, '**/node_modules/**');
@@ -62,6 +72,10 @@ export class IngestionService {
             // Clear previous feature analysis for fresh indexing
             this.featureAnalyzer.clear();
 
+            // Initialize tree-sitter
+            await this.treeSitterParser.initialize();
+
+            // Phase 1: Parse with tree-sitter
             for (let i = 0; i < allFiles.length; i++) {
                 const file = allFiles[i];
                 if (token.isCancellationRequested) {
@@ -72,7 +86,6 @@ export class IngestionService {
                 const relativePath = vscode.workspace.asRelativePath(file.fsPath);
 
                 try {
-                    // Get file stats for incremental indexing
                     const stats = await fs.stat(file.fsPath);
                     const content = await fs.readFile(file.fsPath, 'utf-8');
                     const fileHash = this.calculateHash(content);
@@ -88,43 +101,33 @@ export class IngestionService {
                         filesSkipped++;
                         progress.report({
                             message: `⏭️  Skipped (unchanged): ${relativePath}`,
-                            increment: (1 / allFiles.length) * 100
+                            increment: (1 / allFiles.length) * 50 // First phase is 50%
                         });
                         continue;
                     }
 
                     // Show which file is being indexed
                     progress.report({
-                        message: `📄 Indexing: ${relativePath} (${i + 1}/${allFiles.length})`,
-                        increment: (1 / allFiles.length) * 100
+                        message: `🌳 Tree-sitter parsing: ${relativePath} (${i + 1}/${allFiles.length})`,
+                        increment: (1 / allFiles.length) * 50
                     });
-
-                    const language = this.detectLanguage(file.fsPath);
 
                     if (this.shouldSkipFile(fileName, content)) {
                         filesSkipped++;
                         continue;
                     }
 
-                    // Parse file using appropriate AST parser
-                    let astNodes: ASTNode[] = [];
-
-                    if (language === 'java') {
-                        astNodes = this.javaParser.parse(content, file.fsPath);
-                        console.log(`📊 Java Parser: ${relativePath} returned ${astNodes.length} nodes`);
-                        if (astNodes.length > 0) {
-                            astNodes.forEach((node, idx) => {
-                                console.log(`  [${idx}] ${node.type} "${node.identifier}" - code length: ${node.code?.length || 0} chars`);
-                            });
-                        }
-                    } else if (language === 'typescript') {
-                        astNodes = this.tsParser.parse(content, file.fsPath);
-                    } else if (language === 'javascript') {
-                        astNodes = this.jsParser.parse(content, file.fsPath);
+                    // Parse with tree-sitter (replaces all old parsers)
+                    const astNodes: ASTNode[] = await this.treeSitterParser.parse(content, file.fsPath);
+                    
+                    console.log(`📊 Tree-sitter: ${relativePath} returned ${astNodes.length} nodes`);
+                    if (astNodes.length > 0) {
+                        astNodes.forEach((node, idx) => {
+                            console.log(`  [${idx}] ${node.type} "${node.identifier}" - code length: ${node.code?.length || 0} chars`);
+                        });
                     }
 
-                    // Analyze nodes for feature detection (builds component graph)
-                    // We no longer save individual patterns - only features
+                    // Analyze nodes for feature detection
                     if (astNodes.length > 0) {
                         const components = this.featureAnalyzer.analyzeNodes(astNodes, content, file.fsPath);
                         console.log(`  📊 Analyzed ${astNodes.length} nodes → ${components.length} components`);
@@ -145,8 +148,9 @@ export class IngestionService {
                 }
             }
 
-            // Phase 2: Detect modules in multi-module projects
-            progress.report({ message: "🔍 Detecting project modules..." });
+            // Phase 2: Detect modules
+            progress.report({ message: "Phase 2: Detecting project modules...", increment: 10 });
+            
             
             const workspaceFolders = vscode.workspace.workspaceFolders;
             if (workspaceFolders && workspaceFolders.length > 0) {
@@ -235,6 +239,22 @@ export class IngestionService {
             const moduleInfo = modules.length > 1 
                 ? ` across ${modules.length} modules (${modules.map(m => m.name).join(', ')})`
                 : '';
+
+            // Phase 3: LSP Semantic Indexing (optional enhancement)
+            if (!token.isCancellationRequested && workspaceFolders && workspaceFolders.length > 0) {
+                progress.report({ message: "Phase 3: LSP semantic indexing...", increment: 20 });
+                
+                try {
+                    console.log('[IngestionService] Starting LSP semantic indexing...');
+                    await this.lspIndexer.indexWorkspace(workspaceFolders[0]);
+                    console.log('[IngestionService] ✅ LSP semantic indexing complete');
+                } catch (error) {
+                    console.warn('[IngestionService] LSP indexing failed (non-critical):', error);
+                    vscode.window.showWarningMessage('LSP semantic indexing skipped - language servers may not be ready');
+                }
+            }
+
+            progress.report({ increment: 20 }); // Complete to 100%
 
             const message = filesSkipped > 0
                 ? `✅ Indexed ${features.length} features with ${components.length} components from ${filesProcessed} files${moduleInfo}! Skipped ${filesSkipped} unchanged files.`
