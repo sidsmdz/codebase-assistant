@@ -1,19 +1,12 @@
 import * as vscode from 'vscode';
 import * as path from 'path';
+import * as fs from 'fs/promises';
+import * as TreeSitter from 'web-tree-sitter';
 
-// web-tree-sitter exports as default, not as namespace
-type Parser = any;
-type Language = any;
-type Tree = any;
-type SyntaxNode = any;
-
-let ParserModule: any = null;
-
-try {
-    ParserModule = require('web-tree-sitter');
-} catch (error) {
-    console.warn('web-tree-sitter not available:', error);
-}
+// Type definitions
+type Language = TreeSitter.Language;
+type Tree = TreeSitter.Tree;
+type SyntaxNode = TreeSitter.Node;
 
 interface ParsedNode {
     type: string;
@@ -33,16 +26,15 @@ interface Relationship {
 }
 
 export class TreeSitterWasmManager {
-    private parser: Parser | null = null;
+    private parser: TreeSitter.Parser | null = null;
     private javaLanguage: Language | null = null;
     private typescriptLanguage: Language | null = null;
-    private cache: Map<string, { tree: Tree; version: number }> = new Map();
+    private cache: Map<string, { tree: Tree | null; version: number }> = new Map();
     private initialized: boolean = false;
+    private extensionPath: string;
 
-    constructor() {
-        if (!ParserModule) {
-            console.warn('TreeSitterWasmManager: web-tree-sitter not available');
-        }
+    constructor(extensionPath: string) {
+        this.extensionPath = extensionPath;
     }
 
     async initialize(): Promise<void> {
@@ -50,44 +42,41 @@ export class TreeSitterWasmManager {
             return;
         }
 
-        if (!ParserModule) {
-            throw new Error('web-tree-sitter not available');
-        }
-
         try {
-            // Initialize Parser (loads WASM)
-            await ParserModule.init({
-                locateFile(scriptName: string) {
-                    // WASM file is bundled with web-tree-sitter
-                    return require.resolve(`web-tree-sitter/${scriptName}`);
-                }
+            // Load WASM binary directly to avoid createRequire() issues in bundled extensions
+            const wasmPath = path.join(this.extensionPath, 'dist', 'web-tree-sitter.wasm');
+            console.log('Loading tree-sitter WASM from:', wasmPath);
+            
+            const wasmBuffer = await fs.readFile(wasmPath);
+            const wasmBinary = new Uint8Array(wasmBuffer).buffer;
+            
+            // Initialize Parser with WASM binary
+            await TreeSitter.Parser.init({
+                wasmBinary: wasmBinary
             });
-
-            this.parser = new ParserModule();
-
-            // Try to load language grammars
-            // Note: You'll need to download .wasm grammar files separately
-            // For now, we'll just initialize the parser
-            console.log('✅ Tree-sitter WASM initialized successfully');
+            
+            this.parser = new TreeSitter.Parser();
             this.initialized = true;
 
+            console.log('✅ Tree-sitter WASM initialized successfully');
+
         } catch (error) {
-            console.error('Failed to initialize tree-sitter WASM:', error);
-            throw error;
+            console.error('Tree-sitter WASM initialization failed:', error);
+            console.log('⚠️  Continuing without tree-sitter support');
+            this.initialized = false;
         }
     }
 
     async loadLanguages(): Promise<void> {
-        if (!this.parser || !ParserModule) {
-            throw new Error('Parser not initialized. Call initialize() first.');
+        if (!this.parser) {
+            console.log('Parser not initialized - skipping language loading');
+            return;
         }
 
         try {
             // Load Java grammar
-            // Note: You need to download tree-sitter-java.wasm
-            // From: https://github.com/tree-sitter/tree-sitter-java/releases
             const javaWasmPath = path.join(__dirname, '../../grammars/tree-sitter-java.wasm');
-            this.javaLanguage = await ParserModule.Language.load(javaWasmPath);
+            this.javaLanguage = await TreeSitter.Language.load(javaWasmPath);
             console.log('✅ Java grammar loaded');
         } catch (error) {
             console.warn('⚠️  Java grammar not available:', error);
@@ -96,7 +85,7 @@ export class TreeSitterWasmManager {
         try {
             // Load TypeScript grammar
             const tsWasmPath = path.join(__dirname, '../../grammars/tree-sitter-typescript.wasm');
-            this.typescriptLanguage = await ParserModule.Language.load(tsWasmPath);
+            this.typescriptLanguage = await TreeSitter.Language.load(tsWasmPath);
             console.log('✅ TypeScript grammar loaded');
         } catch (error) {
             console.warn('⚠️  TypeScript grammar not available:', error);
@@ -143,14 +132,19 @@ export class TreeSitterWasmManager {
             return this.parse(filePath, newCode, language);
         }
 
-        // Apply edit to existing tree
-        cached.tree.edit(edit);
-        const newTree = this.parser.parse(newCode, cached.tree);
-        
-        // Update cache
-        this.cache.set(filePath, { tree: newTree, version: Date.now() });
-        
-        return newTree;
+        // Apply edit to existing tree if tree is not null
+        if (cached.tree) {
+            cached.tree.edit(edit);
+            const newTree = this.parser.parse(newCode, cached.tree);
+            
+            // Update cache
+            this.cache.set(filePath, { tree: newTree, version: Date.now() });
+            return newTree;
+        } else {
+            // Re-parse if no tree available
+            const language = this.detectLanguage(filePath);
+            return this.parse(filePath, newCode, language);
+        }
     }
 
     extractEntities(tree: Tree, sourceFile: string): ParsedNode[] {

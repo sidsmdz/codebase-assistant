@@ -3,7 +3,7 @@ import { KnowledgeBaseManager } from './knowledgeBase/KnowledgeBaseManager';
 import { ContextBuilder } from './knowledgeBase/ContextBuilder';
 import { IngestionService } from './ingestionService';
 import { SelectionAnalyzer } from './analysis/SelectionAnalyzer';
-import { SessionManager } from './SessionManager';
+import { SessionManagerV2 } from './session/SessionManagerV2';
 
 /**
  * Represents context extracted from user's chat references (#file, #selection, etc.)
@@ -21,7 +21,7 @@ interface ExtractedContext {
 export function registerChatParticipant(
     extContext: vscode.ExtensionContext,
     kbManager: KnowledgeBaseManager,
-    sessionManager: SessionManager,
+    sessionManager: SessionManagerV2,
     onScanComplete?: () => void
 ): vscode.Disposable {
 
@@ -169,7 +169,7 @@ async function handleQuestion(
     kbManager: KnowledgeBaseManager,
     contextBuilder: ContextBuilder,
     selectionAnalyzer: SelectionAnalyzer,
-    sessionManager: SessionManager,
+    sessionManager: SessionManagerV2,
     token: vscode.CancellationToken
 ): Promise<{ hasCode: boolean; analysisContext?: any }> {
 
@@ -1180,7 +1180,7 @@ async function analyzeImpact(filePath: string, stream: vscode.ChatResponseStream
 
 async function handleSessions(
     stream: vscode.ChatResponseStream,
-    sessionManager: SessionManager,
+    sessionManager: SessionManagerV2,
     token: vscode.CancellationToken
 ): Promise<void> {
     const sessions = sessionManager.getAllSessions();
@@ -1222,7 +1222,7 @@ async function handleSessions(
 async function handleSession(
     request: vscode.ChatRequest,
     stream: vscode.ChatResponseStream,
-    sessionManager: SessionManager,
+    sessionManager: SessionManagerV2,
     token: vscode.CancellationToken
 ): Promise<void> {
     const query = request.prompt.trim();
@@ -1555,7 +1555,7 @@ async function handleGenerate(
     request: vscode.ChatRequest,
     stream: vscode.ChatResponseStream,
     kbManager: KnowledgeBaseManager,
-    sessionManager: SessionManager,
+    sessionManager: SessionManagerV2,
     token: vscode.CancellationToken
 ): Promise<void> {
     const userIntent = request.prompt.trim();
@@ -1627,7 +1627,7 @@ async function handleGenerate(
 
                 for (const turn of recentTurns) {
                     if (turn.contextUsed?.features) {
-                        turn.contextUsed.features.forEach(f => mentionedFeatures.add(f));
+                        turn.contextUsed.features.forEach((f: string) => mentionedFeatures.add(f));
                     }
                     if (turn.content.length < 300) {
                         contextSnippets.push(`${turn.role}: ${turn.content}`);

@@ -1,11 +1,11 @@
 import * as vscode from 'vscode';
-import { SessionManager, Session } from './SessionManager';
+import { SessionManagerV2 } from './session/SessionManagerV2';
 
 export class SessionTreeProvider implements vscode.TreeDataProvider<SessionTreeItem> {
     private _onDidChangeTreeData = new vscode.EventEmitter<SessionTreeItem | undefined | null | void>();
     readonly onDidChangeTreeData = this._onDidChangeTreeData.event;
 
-    constructor(private sessionManager: SessionManager) {}
+    constructor(private sessionManager: SessionManagerV2) {}
 
     refresh(): void {
         this._onDidChangeTreeData.fire();
@@ -26,7 +26,7 @@ export class SessionTreeProvider implements vscode.TreeDataProvider<SessionTreeI
 
             return sessions.map(session => 
                 new SessionTreeItem(
-                    session,
+                    session as any,
                     vscode.TreeItemCollapsibleState.Collapsed,
                     false
                 )
@@ -39,7 +39,7 @@ export class SessionTreeProvider implements vscode.TreeDataProvider<SessionTreeI
         return [];
     }
 
-    private getSessionDetails(session: Session): SessionTreeItem[] {
+    private getSessionDetails(session: any): SessionTreeItem[] {
         const items: SessionTreeItem[] = [];
 
         // Workspace
@@ -119,21 +119,20 @@ export class SessionTreeProvider implements vscode.TreeDataProvider<SessionTreeI
         return items;
     }
 
-    private extractRecentFeatures(session: Session): string[] {
-        const features = new Set<string>();
-        for (const turn of session.conversationHistory.slice(-10)) {
-            if (turn.contextUsed?.features) {
-                turn.contextUsed.features.forEach(f => features.add(f));
-            }
+    private extractRecentFeatures(session: any): string[] {
+        // SessionV2 uses context.features (Set) not conversationHistory
+        if (session.context?.features) {
+            return Array.from(session.context.features as Set<string>).slice(0, 10);
         }
-        return Array.from(features);
+        return [];
     }
 
-    private extractRecentCommands(session: Session): string[] {
+    private extractRecentCommands(session: any): string[] {
         const commands = new Set<string>();
-        for (const turn of session.conversationHistory.slice(-10)) {
-            if (turn.command) {
-                commands.add(turn.command);
+        // SessionV2 uses timeline entries not conversationHistory
+        if (session.timeline) {
+            for (const entry of session.timeline.slice(-10)) {
+                commands.add(entry.type);
             }
         }
         return Array.from(commands);
@@ -142,7 +141,7 @@ export class SessionTreeProvider implements vscode.TreeDataProvider<SessionTreeI
 
 export class SessionTreeItem extends vscode.TreeItem {
     constructor(
-        public readonly session: Session,
+        public readonly session: any,
         public readonly collapsibleState: vscode.TreeItemCollapsibleState,
         public readonly isDetail: boolean = false,
         label?: string,

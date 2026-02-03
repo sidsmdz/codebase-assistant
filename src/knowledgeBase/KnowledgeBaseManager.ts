@@ -45,9 +45,12 @@ export class KnowledgeBaseManager {
 
     async initialize(): Promise<void> {
         try {
+            console.log('[KBManager] Starting initialization...');
             await vscode.workspace.fs.createDirectory(this.context.globalStorageUri);
+            console.log('[KBManager] Created global storage directory');
 
             const wasmPath = path.join(this.context.extensionPath, 'dist', 'sql-wasm.wasm');
+            console.log('[KBManager] Loading SQL.js WASM from:', wasmPath);
             const wasmBuffer = await fs.readFile(wasmPath);
             const wasmBinary = new Uint8Array(wasmBuffer).buffer;
 
@@ -55,36 +58,47 @@ export class KnowledgeBaseManager {
             this.SQL = await initSqlJs({
                 wasmBinary: wasmBinary
             });
+            console.log('[KBManager] SQL.js initialized');
 
             // Try to load existing database
             let buffer: Buffer | undefined;
             try {
                 buffer = await fs.readFile(this.dbPath);
+                console.log('[KBManager] Loaded existing database from:', this.dbPath);
             } catch (e) {
+                console.log('[KBManager] No existing database found, will create new one');
                 // Database doesn't exist yet, will create new one
             }
 
             this.db = new this.SQL.Database(buffer);
+            console.log('[KBManager] Database instance created');
 
             // Create tables with new schema
             await this.createTables();
+            console.log('[KBManager] Database tables created/verified');
 
             // Initialize search components
             this.hybridSearch = new HybridSearchEngine(this.db);
             this.astIndexer = new ASTIndexer(this.db);
             this.termIndexer = new TermIndexer(this.db);
+            console.log('[KBManager] Search components initialized');
             
             // Initialize hybrid knowledge base for relationship-aware queries
-            this.hybridKB = new HybridKnowledgeBase(this.db);
+            this.hybridKB = new HybridKnowledgeBase(this.db, this.context.extensionPath);
+            console.log('[KBManager] HybridKB instance created, starting initialization...');
             await this.hybridKB.initialize();
+            console.log('[KBManager] HybridKB initialized');
 
             this.isReady = true;
-            console.log('Knowledge base initialized with AST + BM25 search at:', this.dbPath);
+            console.log('✅ Knowledge base initialized successfully at:', this.dbPath);
 
         } catch (error) {
             this.isReady = false;
-            console.error('Failed to initialize KB:', error);
+            console.error('❌ Failed to initialize KB:', error);
+            console.error('Error details:', error instanceof Error ? error.stack : error);
             vscode.window.showErrorMessage(`AutoForge failed to initialize its knowledge base. Some features may not work. Error: ${error}`);
+            // Re-throw so extension activation can handle it
+            throw error;
         }
     }
 

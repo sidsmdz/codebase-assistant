@@ -1,13 +1,13 @@
 import * as vscode from 'vscode';
 import { KnowledgeBaseManager } from './knowledgeBase/KnowledgeBaseManager';
 import { IngestionService } from './ingestionService';
-import { registerChatParticipant } from './chatParticipant'; // Now uses modular version
+import { registerChatParticipant } from './chatParticipant/index'; // V2 simplified version
 import { KBTreeProvider } from './kbTreeProvider';
-import { SessionManager } from './SessionManager';
+import { SessionManagerV2 } from './session/SessionManagerV2';
 import { SessionTreeProvider } from './sessionTreeProvider';
 
 let kbManager: KnowledgeBaseManager;
-let sessionManager: SessionManager;
+let sessionManager: SessionManagerV2;
 
 export async function activate(context: vscode.ExtensionContext) {
     console.log('AutoForge extension activating...');
@@ -15,11 +15,15 @@ export async function activate(context: vscode.ExtensionContext) {
     // Store extension context globally for access in chat participant
     (global as any).autoforgeExtensionContext = context;
 
+    console.log('Initializing Knowledge Base Manager...');
     kbManager = new KnowledgeBaseManager(context);
     await kbManager.initialize();
+    console.log('Knowledge Base Manager initialized');
 
-    sessionManager = new SessionManager(context);
+    console.log('Initializing Session Manager V2...');
+    sessionManager = new SessionManagerV2(context, kbManager);
     await sessionManager.initialize();
+    console.log('Session Manager V2 initialized');
 
     // Sidebar tree view for KB browsing
     const treeProvider = new KBTreeProvider(kbManager);
@@ -37,12 +41,14 @@ export async function activate(context: vscode.ExtensionContext) {
     });
     context.subscriptions.push(sessionTreeView);
 
+    console.log('Registering chat participant...');
     // Chat participant (@autoforge in Copilot Chat)
     const participant = registerChatParticipant(context, kbManager, sessionManager, () => {
         treeProvider.refresh();
         sessionTreeProvider.refresh();
     });
     context.subscriptions.push(participant);
+    console.log('Chat participant registered');
     
     // Store participant reference for command access
     context.workspaceState.update('autoforge.participant', participant);
@@ -219,7 +225,7 @@ export async function activate(context: vscode.ExtensionContext) {
                 return;
             }
 
-            const session = sessionManager.getSession(sessionId);
+            const session = await sessionManager.getSession(sessionId);
             if (!session) {
                 return;
             }
@@ -248,7 +254,7 @@ export async function activate(context: vscode.ExtensionContext) {
                 return;
             }
 
-            const session = sessionManager.getSession(sessionId);
+            const session = await sessionManager.getSession(sessionId);
             if (!session) {
                 return;
             }
@@ -281,8 +287,8 @@ export async function activate(context: vscode.ExtensionContext) {
                 return;
             }
 
-            const session = sessionManager.getSession(sessionId);
-            const fileName = `${session?.name || 'session'}.json`.replace(/[^a-z0-9-]/gi, '_');
+            // Get session synchronously from exportSession result
+            const fileName = `session.json`.replace(/[^a-z0-9-]/gi, '_');
 
             const uri = await vscode.window.showSaveDialog({
                 defaultUri: vscode.Uri.file(fileName),
@@ -507,8 +513,8 @@ export async function activate(context: vscode.ExtensionContext) {
             const workspaceFolders = vscode.workspace.workspaceFolders;
             if (workspaceFolders) {
                 const session = await sessionManager.getCurrentSession(workspaceFolders[0].uri.fsPath);
-                if (session && session.conversationHistory.length > 0) {
-                    const recentTurns = session.conversationHistory.slice(-4); // Last 4 turns (2 exchanges)
+                if (session && session.messages.length > 0) {
+                    const recentTurns = session.messages.slice(-4); // Last 4 turns (2 exchanges)
                     kbContext += `\n\n## Recent Context from @autoforge\n`;
                     for (const turn of recentTurns) {
                         const preview = turn.content.length > 150 ? turn.content.substring(0, 150) + '...' : turn.content;
@@ -538,8 +544,8 @@ export async function activate(context: vscode.ExtensionContext) {
             if (workspaceFolders) {
                 try {
                     const session = await sessionManager.getCurrentSession(workspaceFolders[0].uri.fsPath);
-                    if (session && session.conversationHistory.length > 0) {
-                        const lastUserTurn = [...session.conversationHistory]
+                    if (session && session.messages.length > 0) {
+                        const lastUserTurn = [...session.messages]
                             .reverse()
                             .find(t => t.role === 'user');
                         if (lastUserTurn) {

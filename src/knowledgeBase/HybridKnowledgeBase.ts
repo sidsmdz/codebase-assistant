@@ -58,7 +58,7 @@ export class HybridKnowledgeBase {
     private treeSitterCache: Map<string, { timestamp: number; relationships: Relationship[] }> = new Map();
     private hybridFeaturesAvailable: boolean = false;
 
-    constructor(private db: Database) {
+    constructor(private db: Database, private extensionPath?: string) {
         // Initialize optional features if available
         if (LSIFManager) {
             try {
@@ -71,7 +71,7 @@ export class HybridKnowledgeBase {
         if (LSIFGenerator) {
             try {
                 this.lsifGenerator = new LSIFGenerator({
-                    autoGenerate: true,
+                    autoGenerate: false,  // Disable auto-generation to avoid blocking initialization
                     generateOnStartup: false,
                     generateOnBuild: true,
                     outputPath: 'lsif-output',
@@ -82,9 +82,9 @@ export class HybridKnowledgeBase {
             }
         }
         
-        if (TreeSitterWasmManager) {
+        if (TreeSitterWasmManager && extensionPath) {
             try {
-                this.treeSitterManager = new TreeSitterWasmManager();
+                this.treeSitterManager = new TreeSitterWasmManager(extensionPath);
             } catch (error) {
                 console.warn('Failed to initialize TreeSitterWasmManager:', error);
             }
@@ -161,6 +161,12 @@ export class HybridKnowledgeBase {
         
         if (!loaded) {
             console.log('No existing LSIF found. Checking if auto-generation is enabled...');
+            
+            // Only try to generate if auto-generation is enabled
+            if (!this.lsifGenerator || !(this.lsifGenerator as any).config?.autoGenerate) {
+                console.log('LSIF auto-generation is not enabled. Skipping generation.');
+                return;
+            }
             
             // Try to generate LSIF automatically
             const workspaceFolders = vscode.workspace.workspaceFolders;

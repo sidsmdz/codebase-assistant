@@ -42,6 +42,9 @@ export function registerChatParticipant(
     onScanComplete?: () => void
 ): vscode.Disposable {
 
+    // Managers are already initialized by extension.ts before this is called
+    console.log('Registering AutoForge chat participant...');
+
     const participant = vscode.chat.createChatParticipant(
         'autoforge.chatParticipant',
         async (
@@ -51,30 +54,38 @@ export function registerChatParticipant(
             token: vscode.CancellationToken
         ): Promise<vscode.ChatResult> => {
             
+            console.log(`[AutoForge] Request received - command: ${request.command}, prompt: ${request.prompt}`);
+            
             try {
                 // Route to appropriate handler based on command
                 switch (request.command) {
                     case 'scan':
+                        console.log('[AutoForge] Executing /scan');
                         await handleScan(stream, kbManager, token, onScanComplete);
                         return { metadata: { command: 'scan' } };
 
                     case 'find':
+                        console.log('[AutoForge] Executing /find');
                         await handleFind(request, stream, kbManager, token);
                         return { metadata: { command: 'find' } };
 
                     case 'map':
+                        console.log('[AutoForge] Executing /map');
                         await handleMap(request, stream, kbManager, token);
                         return { metadata: { command: 'map' } };
 
                     case 'session':
+                        console.log('[AutoForge] Executing /session');
                         await handleSession(request, stream, sessionManagerV2, token);
                         return { metadata: { command: 'session' } };
 
                     case 'sessions':
+                        console.log('[AutoForge] Executing /sessions');
                         await handleSessions(request, stream, sessionManagerV2, token);
                         return { metadata: { command: 'sessions' } };
 
                     default:
+                        console.log('[AutoForge] Showing help (no command)');
                         // No command → show help
                         stream.markdown(`## 🤖 AutoForge - Context Provider for Copilot\n\n`);
                         stream.markdown(`AutoForge enhances GitHub Copilot with rich codebase context and session management.\n\n`);

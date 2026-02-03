@@ -23,7 +23,7 @@ export async function handleSessions(
         stream.progress('Loading sessions...');
         
         const sessions = await sessionManager.listSessions();
-        const currentSession = sessionManager.getCurrentSession();
+        const currentSession = sessionManager.getCurrentSessionSync();
         
         if (sessions.length === 0) {
             stream.markdown(`## No Sessions Found\n\n`);

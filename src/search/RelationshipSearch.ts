@@ -75,7 +75,7 @@ export class RelationshipSearch {
             ORDER BY cg.file_path, cg.line_number
         `, [entityId]);
 
-        if (!result[0]) return [];
+        if (!result[0]) {return [];}
 
         return result[0].values.map(row => ({
             id: row[0] as string,
@@ -107,7 +107,7 @@ export class RelationshipSearch {
             ORDER BY cg.line_number
         `, [entityId]);
 
-        if (!result[0]) return [];
+        if (!result[0]) {return [];}
 
         return result[0].values.map(row => ({
             id: row[0] as string,
@@ -245,7 +245,7 @@ export class RelationshipSearch {
             ORDER BY er.relationship_type, er.line_number
         `, [entityId]);
 
-        if (!result[0]) return [];
+        if (!result[0]) {return [];}
 
         return result[0].values.map(row => ({
             id: row[0] as string,
@@ -276,7 +276,7 @@ export class RelationshipSearch {
             ORDER BY th.child_type
         `, [typeId]);
 
-        if (!result[0]) return [];
+        if (!result[0]) {return [];}
 
         return result[0].values.map(row => ({
             id: row[0] as string,
@@ -306,7 +306,7 @@ export class RelationshipSearch {
             ORDER BY th.parent_type
         `, [typeId]);
 
-        if (!result[0]) return [];
+        if (!result[0]) {return [];}
 
         return result[0].values.map(row => ({
             id: row[0] as string,
@@ -345,7 +345,7 @@ export class RelationshipSearch {
 
         const result = this.db.exec(query, params);
 
-        if (!result[0]) return [];
+        if (!result[0]) {return [];}
 
         const flowsByVariable = new Map<string, DataFlowPath>();
 
