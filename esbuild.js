@@ -26,7 +26,7 @@ const esbuildProblemMatcherPlugin = {
 };
 
 /**
- * Copy WASM files to dist (sql.js and web-tree-sitter)
+ * Copy WASM files to dist (sql.js, web-tree-sitter, and tree-sitter grammars)
  * @type {import('esbuild').Plugin}
  */
 const copyWasmPlugin = {
@@ -34,10 +34,15 @@ const copyWasmPlugin = {
 	setup(build) {
 		build.onEnd(() => {
 			const distDir = path.join(__dirname, 'dist');
+			const distGrammarsDir = path.join(distDir, 'grammars');
 			
 			try {
 				if (!fs.existsSync(distDir)) {
 					fs.mkdirSync(distDir, { recursive: true });
+				}
+				
+				if (!fs.existsSync(distGrammarsDir)) {
+					fs.mkdirSync(distGrammarsDir, { recursive: true });
 				}
 				
 				// Copy sql.js WASM
@@ -52,6 +57,18 @@ const copyWasmPlugin = {
 				if (fs.existsSync(treeSitterWasmSource)) {
 					fs.copyFileSync(treeSitterWasmSource, treeSitterWasmDest);
 					console.log('[copy-wasm] web-tree-sitter.wasm copied to dist/');
+				}
+				
+				// Copy tree-sitter grammar WASM files
+				const grammarsSource = path.join(__dirname, 'grammars');
+				if (fs.existsSync(grammarsSource)) {
+					const grammarFiles = fs.readdirSync(grammarsSource).filter(f => f.endsWith('.wasm'));
+					grammarFiles.forEach(file => {
+						const source = path.join(grammarsSource, file);
+						const dest = path.join(distGrammarsDir, file);
+						fs.copyFileSync(source, dest);
+						console.log(`[copy-wasm] ${file} copied to dist/grammars/`);
+					});
 				}
 			} catch (error) {
 				console.error('[copy-wasm] Failed to copy WASM files:', error);

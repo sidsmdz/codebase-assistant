@@ -74,8 +74,8 @@ export class TreeSitterWasmManager {
         }
 
         try {
-            // Load Java grammar
-            const javaWasmPath = path.join(__dirname, '../../grammars/tree-sitter-java.wasm');
+            // Load Java grammar from dist folder (grammars are copied during build)
+            const javaWasmPath = path.join(this.extensionPath, 'dist', 'grammars', 'tree-sitter-java.wasm');
             this.javaLanguage = await TreeSitter.Language.load(javaWasmPath);
             console.log('✅ Java grammar loaded');
         } catch (error) {
@@ -83,8 +83,8 @@ export class TreeSitterWasmManager {
         }
 
         try {
-            // Load TypeScript grammar
-            const tsWasmPath = path.join(__dirname, '../../grammars/tree-sitter-typescript.wasm');
+            // Load TypeScript grammar from dist folder (grammars are copied during build)
+            const tsWasmPath = path.join(this.extensionPath, 'dist', 'grammars', 'tree-sitter-typescript.wasm');
             this.typescriptLanguage = await TreeSitter.Language.load(tsWasmPath);
             console.log('✅ TypeScript grammar loaded');
         } catch (error) {
