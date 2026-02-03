@@ -1,0 +1,11 @@
+{
+  "name": "codebase-assistant-monorepo",
+  "private": true,
+  "workspaces": [
+    "../core",
+    "../parsers",
+    "../indexers",
+    "../search",
+    "../vscode-extension"
+  ]
+}

@@ -26,24 +26,35 @@ const esbuildProblemMatcherPlugin = {
 };
 
 /**
- * Copy sql.js WASM file to dist
+ * Copy WASM files to dist (sql.js and web-tree-sitter)
  * @type {import('esbuild').Plugin}
  */
 const copyWasmPlugin = {
 	name: 'copy-wasm',
 	setup(build) {
 		build.onEnd(() => {
-			const wasmSource = path.join(__dirname, 'node_modules', 'sql.js', 'dist', 'sql-wasm.wasm');
-			const wasmDest = path.join(__dirname, 'dist', 'sql-wasm.wasm');
+			const distDir = path.join(__dirname, 'dist');
 			
 			try {
-				if (!fs.existsSync(path.join(__dirname, 'dist'))) {
-					fs.mkdirSync(path.join(__dirname, 'dist'), { recursive: true });
+				if (!fs.existsSync(distDir)) {
+					fs.mkdirSync(distDir, { recursive: true });
 				}
-				fs.copyFileSync(wasmSource, wasmDest);
+				
+				// Copy sql.js WASM
+				const sqlWasmSource = path.join(__dirname, 'node_modules', 'sql.js', 'dist', 'sql-wasm.wasm');
+				const sqlWasmDest = path.join(distDir, 'sql-wasm.wasm');
+				fs.copyFileSync(sqlWasmSource, sqlWasmDest);
 				console.log('[copy-wasm] sql-wasm.wasm copied to dist/');
+				
+				// Copy web-tree-sitter WASM
+				const treeSitterWasmSource = path.join(__dirname, 'node_modules', 'web-tree-sitter', 'web-tree-sitter.wasm');
+				const treeSitterWasmDest = path.join(distDir, 'web-tree-sitter.wasm');
+				if (fs.existsSync(treeSitterWasmSource)) {
+					fs.copyFileSync(treeSitterWasmSource, treeSitterWasmDest);
+					console.log('[copy-wasm] web-tree-sitter.wasm copied to dist/');
+				}
 			} catch (error) {
-				console.error('[copy-wasm] Failed to copy WASM file:', error);
+				console.error('[copy-wasm] Failed to copy WASM files:', error);
 			}
 		});
 	}
