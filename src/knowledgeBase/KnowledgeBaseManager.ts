@@ -7,6 +7,7 @@ import { ASTIndexer } from '../indexing/ASTIndexer';
 import { TermIndexer, IndexableDocument } from '../indexing/TermIndexer';
 import { ASTNode } from '../parsers/ASTParser';
 import { Feature, FeatureComponent, FeatureFlow, ComponentType } from '../analysis/FeatureAnalyzer';
+import { HybridKnowledgeBase } from './HybridKnowledgeBase';
 
 export interface SavedPattern {
     id: string;
@@ -34,6 +35,9 @@ export class KnowledgeBaseManager {
     private hybridSearch!: HybridSearchEngine;
     private astIndexer!: ASTIndexer;
     private termIndexer!: TermIndexer;
+    
+    // Hybrid knowledge base for relationship-aware queries
+    private hybridKB!: HybridKnowledgeBase;
 
     constructor(private context: vscode.ExtensionContext) {
         this.dbPath = path.join(context.globalStorageUri.fsPath, 'autoforge.db');
@@ -69,6 +73,10 @@ export class KnowledgeBaseManager {
             this.hybridSearch = new HybridSearchEngine(this.db);
             this.astIndexer = new ASTIndexer(this.db);
             this.termIndexer = new TermIndexer(this.db);
+            
+            // Initialize hybrid knowledge base for relationship-aware queries
+            this.hybridKB = new HybridKnowledgeBase(this.db);
+            await this.hybridKB.initialize();
 
             this.isReady = true;
             console.log('Knowledge base initialized with AST + BM25 search at:', this.dbPath);
@@ -1530,6 +1538,137 @@ export class KnowledgeBaseManager {
         } catch (error) {
             console.error('Error getting cross-module dependencies:', error);
             return [];
+        }
+    }
+
+    // ============================================================
+    // Hybrid Knowledge Base Methods (Tree-sitter + LSIF)
+    // ============================================================
+
+    /**
+     * Index a file using hybrid approach (LSIF-first, tree-sitter fallback)
+     */
+    async indexFileWithRelationships(filePath: string): Promise<void> {
+        if (!this.isReady || !this.hybridKB) {
+            return;
+        }
+        await this.hybridKB.indexFile(filePath);
+    }
+
+    /**
+     * Update a file's relationships incrementally
+     */
+    async updateFileRelationships(filePath: string): Promise<void> {
+        if (!this.isReady || !this.hybridKB) {
+            return;
+        }
+        await this.hybridKB.updateFile(filePath);
+    }
+
+    /**
+     * Find relationships for an entity (class, method, interface, etc.)
+     * Example: findEntityRelationships('PaymentGateway', { relationship: 'CALLS' })
+     */
+    async findEntityRelationships(
+        entityName: string,
+        options?: {
+            type?: 'class' | 'method' | 'interface' | 'field' | 'all';
+            relationship?: 'EXTENDS' | 'IMPLEMENTS' | 'CALLS' | 'USES' | 'DEFINES' | 'all';
+            maxDepth?: number;
+        }
+    ): Promise<any[]> {
+        if (!this.isReady || !this.hybridKB) {
+            return [];
+        }
+        return await this.hybridKB.findRelationships(entityName, options);
+    }
+
+    /**
+     * Find all methods that call a specific method
+     * Example: findMethodCallers('PaymentGateway.processPayment')
+     */
+    async findMethodCallers(methodName: string): Promise<any[]> {
+        if (!this.isReady || !this.hybridKB) {
+            return [];
+        }
+        return await this.hybridKB.findCallers(methodName);
+    }
+
+    /**
+     * Find all methods called by a specific method
+     * Example: findMethodCallees('UserController.createUser')
+     */
+    async findMethodCallees(methodName: string): Promise<any[]> {
+        if (!this.isReady || !this.hybridKB) {
+            return [];
+        }
+        return await this.hybridKB.findCallees(methodName);
+    }
+
+    /**
+     * Trace data flow for an entity
+     * Example: traceEntityDataFlow('Transaction', 3) - traces how Transaction flows through 3 levels
+     */
+    async traceEntityDataFlow(entityName: string, maxDepth: number = 3): Promise<any[]> {
+        if (!this.isReady || !this.hybridKB) {
+            return [];
+        }
+        return await this.hybridKB.traceDataFlow(entityName, maxDepth);
+    }
+
+    /**
+     * Find type hierarchy for a class or interface
+     * Example: findClassHierarchy('BaseService') - returns superclasses, subclasses, interfaces
+     */
+    async findClassHierarchy(typeName: string): Promise<{
+        superclasses: string[];
+        subclasses: string[];
+        interfaces: string[];
+    }> {
+        if (!this.isReady || !this.hybridKB) {
+            return { superclasses: [], subclasses: [], interfaces: [] };
+        }
+        return await this.hybridKB.findTypeHierarchy(typeName);
+    }
+
+    /**
+     * Get statistics about the hybrid knowledge base
+     */
+    getHybridKBStats(): any {
+        if (!this.isReady || !this.hybridKB) {
+            return null;
+        }
+        return this.hybridKB.getStats();
+    }
+
+    /**
+     * Clear hybrid KB caches (useful after large changes)
+     */
+    clearHybridKBCaches(): void {
+        if (this.hybridKB) {
+            this.hybridKB.clearCaches();
+        }
+    }
+
+    /**
+     * Manually regenerate LSIF index
+     */
+    async regenerateLSIFIndex(): Promise<void> {
+        if (this.hybridKB) {
+            await this.hybridKB.regenerateLSIF();
+        }
+    }
+
+    /**
+     * Update LSIF generator configuration
+     */
+    updateLSIFConfig(config: {
+        autoGenerate?: boolean;
+        generateOnStartup?: boolean;
+        generateOnBuild?: boolean;
+    }): void {
+        if (this.hybridKB) {
+            this.hybridKB.updateGeneratorConfig(config);
         }
     }
 }

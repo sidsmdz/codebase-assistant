@@ -1,0 +1,11 @@
+syntax = "proto3";
+
+message OnboardingRequest {
+  string name = 1;
+  string email = 2;
+}
+
+message OnboardingResponse {
+  string user_id = 1;
+  string status = 2;
+}

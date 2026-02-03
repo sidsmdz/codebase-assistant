@@ -2,14 +2,13 @@
 
 **v0.2.0** | VS Code Extension | GitHub Copilot Integration
 
-AutoForge is a VS Code extension that scans your workspace, builds a knowledge base of features, components, and data flows, then uses this context to power intelligent AI conversations through GitHub Copilot.
+AutoForge is a VS Code extension that scans your workspace, builds a knowledge base of features and components, then uses this context to power intelligent AI conversations through GitHub Copilot.
 
 ## What It Does
 
 1. **Scans your codebase** - Parses Java, TypeScript, and JavaScript files into ASTs
 2. **Discovers features** - Traces dependencies from controllers through services to repositories, grouping components into end-to-end features
 3. **Tracks data flows** - Maps calls, imports, injections, and events between components
-4. **Powers AI chat** - Sends rich feature context (code, data flows, dependencies, entry points) to GitHub Copilot for context-aware responses
 
 ## Why AutoForge? What Plain Copilot Can't Do
 
@@ -28,7 +27,7 @@ GitHub Copilot is powerful, but it works file-by-file. It sees your current edit
 
 ### How It Works Under the Hood
 
-When you ask a question, AutoForge doesn't just forward it to Copilot. It:
+When you ask a question, AutoForge doesn't just forward it to Copilot.
 
 1. **Searches the knowledge base** using hybrid search (AST + BM25 + fuzzy) to find relevant features
 2. **Builds a rich prompt** with the matching feature's full context:
@@ -49,7 +48,6 @@ The result: Copilot responses that understand your architecture, follow your con
 npm install
 
 # Build the extension
-npm run compile
 
 # Run in VS Code
 # Press F5 to launch Extension Development Host
@@ -66,7 +64,6 @@ npm run compile
 
 | Command | Description |
 |---------|-------------|
-| `AutoForge: Index Workspace` | Scan all source files, build AST, discover features and data flows |
 | `AutoForge: Open Chat` | Open the AI chat sidebar |
 | `AutoForge: Show KB Stats` | Display features, components, data flows, languages, frameworks |
 | `AutoForge: List Saved Patterns` | Browse features with quick pick - view components, data flow, details |
