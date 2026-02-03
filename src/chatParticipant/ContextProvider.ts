@@ -370,64 +370,78 @@ export class ContextProvider {
     }
 
     /**
-     * Format the hybrid context into a structured prompt
+     * Format the hybrid context into a structured prompt with strong anchoring
      */
     formatAsPrompt(context: HybridContext): string {
         const sections: string[] = [];
 
-        // Header
-        sections.push('### SYSTEM CONTEXT');
-        sections.push('You are an expert developer. Below is the relevant project context.\n');
+        // CRITICAL: System instruction for context anchoring
+        sections.push('### 🎯 SYSTEM INSTRUCTION - CONTEXT ANCHORING');
+        sections.push('**The following is the ACTIVE CODE GRAPH for the current workspace.**');
+        sections.push('**IMPORTANT: Use the provided interfaces, types, and definitions below as GROUND TRUTH.**');
+        sections.push('**Do NOT ask clarifying questions if the definitions exist in this context.**');
+        sections.push('**If a symbol is defined below, use that definition directly in your answer.**\n');
 
         // Layer 2: Skeleton Map
         if (context.skeletonMap.length > 0) {
-            sections.push('### CURRENT WORKSPACE SKELETON');
+            sections.push('### 📋 CURRENT WORKSPACE SKELETON');
+            sections.push('*Available symbols and their signatures (use these as definitive references):*\n');
             for (const file of context.skeletonMap) {
                 const relativePath = vscode.workspace.asRelativePath(file.filePath);
-                sections.push(`- File: \`${relativePath}\` (${file.language})`);
+                sections.push(`#### File: \`${relativePath}\` (${file.language})`);
                 
                 for (const node of file.outline) {
-                    sections.push(this.formatSkeletonNode(node, 2));
+                    sections.push(this.formatSkeletonNode(node, 0));
                 }
+                sections.push('');
             }
-            sections.push('');
         }
 
         // Layer 3: Dependencies
         if (context.dependencies.length > 0) {
-            sections.push('### EXTERNAL DEPENDENCIES (LSP Resolved)');
+            sections.push('### 🔗 EXTERNAL DEPENDENCIES (Cross-file references resolved via LSP)');
+            sections.push('*These types/interfaces are imported and used in the active code:*\n');
             for (const dep of context.dependencies) {
                 const relativePath = vscode.workspace.asRelativePath(dep.filePath);
-                sections.push(`- \`${dep.symbolName}\` from \`${relativePath}\``);
-                sections.push(`  \`\`\`${dep.language}`);
-                sections.push(`  ${dep.signature}`);
-                sections.push(`  \`\`\``);
+                sections.push(`#### \`${dep.symbolName}\` from \`${relativePath}\` (${dep.language})`);
+                sections.push('```' + dep.language);
+                sections.push(dep.signature);
+                sections.push('```\n');
             }
-            sections.push('');
         }
 
         // LSP Context
         if (context.lspContext.symbols.length > 0 || context.lspContext.diagnostics.length > 0) {
-            sections.push('### LOCAL SYMBOLS & DIAGNOSTICS (LSP)');
+            sections.push('### 🔍 LSP DIAGNOSTICS & SYMBOL METADATA');
             
-            for (const symbol of context.lspContext.symbols) {
-                sections.push(`- Symbol \`${symbol.name}\`: Type \`${symbol.type}\``);
+            if (context.lspContext.symbols.length > 0) {
+                sections.push('**Active Symbols in Scope:**');
+                for (const symbol of context.lspContext.symbols) {
+                    const relativePath = vscode.workspace.asRelativePath(symbol.definedIn);
+                    sections.push(`- \`${symbol.name}\`: \`${symbol.type}\` (defined in ${relativePath})`);
+                }
+                sections.push('');
             }
             
-            for (const diag of context.lspContext.diagnostics) {
-                sections.push(`- ${diag.severity}: ${diag.message}`);
+            if (context.lspContext.diagnostics.length > 0) {
+                sections.push('**⚠️ Active Diagnostics (use these to understand current issues):**');
+                for (const diag of context.lspContext.diagnostics) {
+                    sections.push(`- ${diag.severity}: ${diag.message}`);
+                }
+                sections.push('');
             }
-            sections.push('');
         }
 
-        // Layer 1: Active Code (Focal Point)
-        sections.push('### ACTIVE CODE (Focal Point)');
+        // Layer 1: Active Code (Focal Point) - LAST for recency bias
+        sections.push('### 🎯 ACTIVE CODE (Focal Point)');
         if (context.activeCode.symbolName) {
-            sections.push(`Currently editing: \`${context.activeCode.symbolName}\`\n`);
+            sections.push(`**Currently editing:** \`${context.activeCode.symbolName}\` in \`${vscode.workspace.asRelativePath(context.activeCode.filePath)}\`\n`);
         }
-        sections.push(`\`\`\`${context.activeCode.language}`);
+        sections.push('```' + context.activeCode.language);
         sections.push(context.activeCode.code);
         sections.push('```');
+        sections.push('\n**END OF CONTEXT GRAPH**');
+        sections.push('*Use the above definitions to answer questions without requesting clarifications.*');
 
         return sections.join('\n');
     }
@@ -510,16 +524,81 @@ export class ContextProvider {
         return node.text?.split('(')[0]?.split(' ').pop();
     }
 
+    /**
+     * Find related files (same directory + cross-language pairs)
+     */
     private async findRelatedFiles(document: vscode.TextDocument): Promise<vscode.Uri[]> {
-        // Simple heuristic: files in same directory
+        const relatedFiles: vscode.Uri[] = [];
+        
+        // 1. Files in same directory
         const dirPath = vscode.Uri.joinPath(document.uri, '..');
-        const files = await vscode.workspace.findFiles(
+        const sameDir = await vscode.workspace.findFiles(
             new vscode.RelativePattern(dirPath, '*.{java,ts,tsx,js,jsx}'),
             null,
             10
         );
-        
-        return files.filter(uri => uri.toString() !== document.uri.toString());
+        relatedFiles.push(...sameDir.filter(uri => uri.toString() !== document.uri.toString()));
+
+        // 2. Cross-language pairs (e.g., UserService.java → UserService.ts)
+        const baseName = document.uri.fsPath.split('/').pop()?.replace(/\.(java|ts|tsx|js|jsx)$/, '');
+        if (baseName) {
+            const crossLangPatterns = [
+                `**/${baseName}.java`,
+                `**/${baseName}.ts`,
+                `**/${baseName}.tsx`,
+                `**/${baseName}Controller.java`,  // Spring pattern
+                `**/${baseName}Service.java`,      // Spring pattern
+                `**/${baseName}Repository.java`,   // Spring pattern
+                `**/I${baseName}.ts`,              // Interface pattern
+                `**/use${baseName}.ts`             // React hook pattern
+            ];
+
+            for (const pattern of crossLangPatterns) {
+                try {
+                    const matches = await vscode.workspace.findFiles(pattern, null, 3);
+                    relatedFiles.push(...matches.filter(uri => 
+                        uri.toString() !== document.uri.toString() &&
+                        !relatedFiles.some(f => f.toString() === uri.toString())
+                    ));
+                } catch (error) {
+                    // Skip pattern if it fails
+                }
+            }
+        }
+
+        // 3. API endpoint matching (Java controller → TypeScript service)
+        // Look for files with same base name in different layers
+        const fileName = document.uri.fsPath.split('/').pop()?.replace(/\.(java|ts|tsx)$/, '');
+        if (fileName) {
+            // If it's a Java controller, find corresponding TS service
+            if (fileName.includes('Controller')) {
+                const serviceName = fileName.replace('Controller', 'Service');
+                const tsServices = await vscode.workspace.findFiles(
+                    `**/${serviceName}.ts`,
+                    null,
+                    3
+                );
+                relatedFiles.push(...tsServices);
+            }
+            
+            // If it's a TS service, find corresponding Java controller
+            if (fileName.includes('Service') && document.languageId === 'typescript') {
+                const controllerName = fileName.replace('Service', 'Controller');
+                const javaControllers = await vscode.workspace.findFiles(
+                    `**/${controllerName}.java`,
+                    null,
+                    3
+                );
+                relatedFiles.push(...javaControllers);
+            }
+        }
+
+        // Remove duplicates and limit
+        const uniqueFiles = Array.from(new Set(relatedFiles.map(f => f.toString())))
+            .map(str => vscode.Uri.parse(str))
+            .slice(0, 5);
+
+        return uniqueFiles;
     }
 
     private async findExternalReferences(

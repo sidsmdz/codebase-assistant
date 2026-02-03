@@ -28,30 +28,35 @@ export async function addContextToStream(
 
         // Show summary in collapsible section
         stream.markdown('\n<details>\n');
-        stream.markdown('<summary>🧠 <b>Thinking...</b> (context analysis)</summary>\n\n');
+        stream.markdown('<summary>🧠 <b>Context Added</b> - Active Code Graph Injected</summary>\n\n');
+        
+        stream.markdown('**⚡ GROUND TRUTH CONTEXT - Use these definitions without asking for clarification:**\n\n');
         
         // Context summary
-        stream.markdown('**Context Added:**\n');
-        stream.markdown(`- 📍 **Focal Point:** ${context.activeCode.symbolName || 'Current selection'}\n`);
-        stream.markdown(`- 📄 **File:** \`${vscode.workspace.asRelativePath(context.activeCode.filePath)}\`\n`);
-        stream.markdown(`- 🗺️ **Related Files:** ${context.skeletonMap.length}\n`);
-        stream.markdown(`- 🔗 **External Dependencies:** ${context.dependencies.length}\n`);
-        stream.markdown(`- ⚠️ **Diagnostics:** ${context.lspContext.diagnostics.length}\n\n`);
+        stream.markdown('**📊 Context Summary:**\n');
+        stream.markdown(`- 📍 **Focal Point:** \`${context.activeCode.symbolName || 'Current selection'}\`\n`);
+        stream.markdown(`- 📄 **File:** \`${vscode.workspace.asRelativePath(context.activeCode.filePath)}\` (${context.activeCode.language})\n`);
+        stream.markdown(`- 🗺️ **Related Files:** ${context.skeletonMap.length} file(s) with signatures\n`);
+        stream.markdown(`- 🔗 **External Dependencies:** ${context.dependencies.length} cross-file reference(s)\n`);
+        if (context.lspContext.diagnostics.length > 0) {
+            stream.markdown(`- ⚠️ **Diagnostics:** ${context.lspContext.diagnostics.length} issue(s) detected\n`);
+        }
+        stream.markdown('\n');
 
         if (context.skeletonMap.length > 0) {
-            stream.markdown('**Skeleton Map:**\n');
+            stream.markdown('**🗺️ Skeleton Map (Available Symbols):**\n');
             for (const file of context.skeletonMap) {
                 const relativePath = vscode.workspace.asRelativePath(file.filePath);
-                stream.markdown(`- \`${relativePath}\` (${file.outline.length} symbols)\n`);
+                stream.markdown(`- \`${relativePath}\` (${file.language}) - ${file.outline.length} symbol(s)\n`);
             }
             stream.markdown('\n');
         }
 
         if (context.dependencies.length > 0) {
-            stream.markdown('**Dependencies Resolved:**\n');
+            stream.markdown('**🔗 Cross-File Dependencies (LSP Resolved):**\n');
             for (const dep of context.dependencies.slice(0, 5)) {
                 const relativePath = vscode.workspace.asRelativePath(dep.filePath);
-                stream.markdown(`- \`${dep.symbolName}\` from \`${relativePath}\`\n`);
+                stream.markdown(`- \`${dep.symbolName}\` → \`${relativePath}\` (${dep.language})\n`);
             }
             if (context.dependencies.length > 5) {
                 stream.markdown(`- ...and ${context.dependencies.length - 5} more\n`);
@@ -60,9 +65,9 @@ export async function addContextToStream(
         }
 
         if (context.lspContext.diagnostics.length > 0) {
-            stream.markdown('**Diagnostics:**\n');
+            stream.markdown('**⚠️ Active Diagnostics:**\n');
             for (const diag of context.lspContext.diagnostics.slice(0, 3)) {
-                stream.markdown(`- ⚠️ ${diag.severity}: ${diag.message}\n`);
+                stream.markdown(`- ${diag.severity}: ${diag.message}\n`);
             }
             if (context.lspContext.diagnostics.length > 3) {
                 stream.markdown(`- ...and ${context.lspContext.diagnostics.length - 3} more\n`);
@@ -80,7 +85,10 @@ export async function addContextToStream(
             stream.markdown('</details>\n\n');
         }
 
-        stream.markdown('*Token efficiency: ~90% reduction vs traditional full-file context*\n');
+        stream.markdown('**💡 How to use this context:**\n');
+        stream.markdown('- All symbols above are DEFINITIVE - answer without requesting clarification\n');
+        stream.markdown('- Cross-language references are pre-resolved (Java ↔ TypeScript)\n');
+        stream.markdown('- Token efficiency: ~90% reduction vs full-file dumps\n');
         stream.markdown('</details>\n\n');
 
         return context;
