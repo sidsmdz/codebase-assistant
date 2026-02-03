@@ -1,6 +1,8 @@
 import * as vscode from 'vscode';
 import { KnowledgeBaseManager } from '../knowledgeBase/KnowledgeBaseManager';
 import { SessionManagerV2 } from '../session/SessionManagerV2';
+import { ContextProvider } from './ContextProvider';
+import { addContextToStream, shouldAddContext } from './utilities/contextHelper';
 
 /**
  * CHAT PARTICIPANT V2 - SIMPLIFIED ARCHITECTURE ✨
@@ -39,6 +41,7 @@ export function registerChatParticipant(
     extContext: vscode.ExtensionContext,
     kbManager: KnowledgeBaseManager,
     sessionManagerV2: SessionManagerV2,
+    contextProvider: ContextProvider,
     onScanComplete?: () => void
 ): vscode.Disposable {
 
@@ -56,9 +59,29 @@ export function registerChatParticipant(
             
             console.log(`[AutoForge] Request received - command: ${request.command}, prompt: ${request.prompt}`);
             
+            // Auto-add context for non-command queries if appropriate
+            let contextAdded = false;
+            if (!request.command && shouldAddContext(request)) {
+                console.log('[AutoForge] Auto-adding hybrid context...');
+                await addContextToStream(stream, contextProvider, false);
+                contextAdded = true;
+            }
+            
             try {
                 // Route to appropriate handler based on command
                 switch (request.command) {
+                    case 'context':
+                        console.log('[AutoForge] Executing /context');
+                        // Show full context with details
+                        await addContextToStream(stream, contextProvider, true);
+                        stream.markdown(`---\n\n`);
+                        stream.markdown(`💡 **Using Context:** This structured context is now available for your queries.\n\n`);
+                        stream.markdown(`**Next Steps:**\n`);
+                        stream.markdown(`- Ask questions about the code structure\n`);
+                        stream.markdown(`- Request implementations using the resolved dependencies\n`);
+                        stream.markdown(`- Use \`@workspace\` to leverage this context for code generation\n`);
+                        return { metadata: { command: 'context', hasContext: true } };
+
                     case 'scan':
                         console.log('[AutoForge] Executing /scan');
                         await handleScan(stream, kbManager, token, onScanComplete);
@@ -86,6 +109,12 @@ export function registerChatParticipant(
 
                     default:
                         console.log('[AutoForge] Showing help (no command)');
+                        
+                        // If context was auto-added, acknowledge it
+                        if (contextAdded) {
+                            stream.markdown(`I've analyzed the current code context. How can I help?\n\n`);
+                        }
+                        
                         // No command → show help
                         stream.markdown(`## 🤖 AutoForge - Context Provider for Copilot\n\n`);
                         stream.markdown(`AutoForge enhances GitHub Copilot with rich codebase context and session management.\n\n`);
@@ -94,24 +123,27 @@ export function registerChatParticipant(
                         stream.markdown(`- \`/scan\` - Index codebase (features + components)\n`);
                         stream.markdown(`- \`/find <query>\` - Search knowledge base\n`);
                         stream.markdown(`- \`/map\` - Visualize architecture\n`);
+                        stream.markdown(`- \`/context\` - Show current code context (Tree-sitter + LSP)\n`);
                         stream.markdown(`- \`/session <name>\` - Switch/create session\n`);
                         stream.markdown(`- \`/sessions\` - List all sessions\n\n`);
                         
                         stream.markdown(`### 💡 How to Use:\n\n`);
                         stream.markdown(`1. **Index your codebase:** \`@autoforge /scan\`\n`);
                         stream.markdown(`2. **Search for features:** \`@autoforge /find authentication\`\n`);
-                        stream.markdown(`3. **Create a session:** \`@autoforge /session auth-work\`\n`);
-                        stream.markdown(`4. **Use with Copilot:** \`@workspace implement login based on auth-work session\`\n\n`);
+                        stream.markdown(`3. **View current context:** \`@autoforge /context\`\n`);
+                        stream.markdown(`4. **Create a session:** \`@autoforge /session auth-work\`\n`);
+                        stream.markdown(`5. **Use with Copilot:** \`@workspace implement login based on auth-work session\`\n\n`);
                         
                         stream.markdown(`### 🎯 Key Features:\n\n`);
-                        stream.markdown(`- **Automatic Context:** Sessions track features, components, and files\n`);
+                        stream.markdown(`- **Hybrid Context:** Tree-sitter + LSP for 90% token reduction\n`);
+                        stream.markdown(`- **Automatic Context:** Transparently adds context when needed\n`);
+                        stream.markdown(`- **Session Management:** Track features, components, and files\n`);
                         stream.markdown(`- **Timeline Tracking:** See your interaction history\n`);
-                        stream.markdown(`- **Context Restoration:** Switch sessions and restore full context\n`);
                         stream.markdown(`- **Seamless Integration:** Context flows to @workspace automatically\n\n`);
                         
-                        stream.markdown(`💡 **Tip:** Use \`@autoforge /find <query>\` to explore, then let \`@workspace\` handle code generation!\n`);
+                        stream.markdown(`💡 **Tip:** Just ask questions naturally - context is automatically added when needed!\n`);
                         
-                        return { metadata: { command: 'help' } };
+                        return { metadata: { command: 'help', contextAdded } };
                 }
             } catch (error) {
                 stream.markdown(`⚠️ An error occurred: ${error instanceof Error ? error.message : String(error)}`);

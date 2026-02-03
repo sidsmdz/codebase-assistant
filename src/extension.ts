@@ -5,9 +5,13 @@ import { registerChatParticipant } from './chatParticipant/index'; // V2 simplif
 import { KBTreeProvider } from './kbTreeProvider';
 import { SessionManagerV2 } from './session/SessionManagerV2';
 import { SessionTreeProvider } from './sessionTreeProvider';
+import { ContextProvider } from './chatParticipant/ContextProvider';
+import { TreeSitterWasmManager } from './parsers/TreeSitterWasmManager';
+import { LSPProvider } from './indexing/LSPProvider';
 
 let kbManager: KnowledgeBaseManager;
 let sessionManager: SessionManagerV2;
+let contextProvider: ContextProvider;
 
 export async function activate(context: vscode.ExtensionContext) {
     console.log('AutoForge extension activating...');
@@ -24,6 +28,14 @@ export async function activate(context: vscode.ExtensionContext) {
     sessionManager = new SessionManagerV2(context, kbManager);
     await sessionManager.initialize();
     console.log('Session Manager V2 initialized');
+
+    console.log('Initializing Context Provider...');
+    const treeSitter = new TreeSitterWasmManager(context.extensionPath);
+    await treeSitter.initialize();
+    await treeSitter.loadLanguages();
+    const lspProvider = new LSPProvider();
+    contextProvider = new ContextProvider(treeSitter, lspProvider);
+    console.log('Context Provider initialized');
 
     // Sidebar tree view for KB browsing
     const treeProvider = new KBTreeProvider(kbManager);
@@ -43,7 +55,7 @@ export async function activate(context: vscode.ExtensionContext) {
 
     console.log('Registering chat participant...');
     // Chat participant (@autoforge in Copilot Chat)
-    const participant = registerChatParticipant(context, kbManager, sessionManager, () => {
+    const participant = registerChatParticipant(context, kbManager, sessionManager, contextProvider, () => {
         treeProvider.refresh();
         sessionTreeProvider.refresh();
     });
