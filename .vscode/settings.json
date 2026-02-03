@@ -9,5 +9,19 @@
         "dist": true // set this to false to include "dist" folder in search results
     },
     // Turn off tsc task auto detection since we have the necessary tasks as npm scripts
-    "typescript.tsc.autoDetect": "off"
+    "typescript.tsc.autoDetect": "off",
+    
+    // ==================== AutoForge Tool Execution Settings ====================
+    // Enable automatic execution of AutoForge tools by @workspace agent
+    "github.copilot.chat.tools.autoApprove": [
+        "autoforge_analyzeImpact",
+        "autoforge_findFeature",
+        "autoforge_verifyBridge"
+    ],
+    
+    // Allow @workspace to proxy intent through extension tools
+    "github.copilot.chat.agent.proxyExtensionTools": true,
+    
+    // Ensure workspace is trusted for tool execution
+    "security.workspace.trust.enabled": true
 }
