@@ -4,6 +4,7 @@ import * as fs from 'fs';
 import { Database } from 'sql.js';
 import { RelationshipIndexer } from '../indexing/RelationshipIndexer';
 import { RelationshipSearch, RelatedEntity, DataFlowPath as SearchDataFlowPath } from '../search/RelationshipSearch';
+import { LSPProvider } from '../indexing/LSPProvider';
 
 // Optional imports - fail gracefully if modules are not available
 let LSIFManager: any;
@@ -52,6 +53,7 @@ export class HybridKnowledgeBase {
     private treeSitterManager: any;
     private relationshipIndexer: RelationshipIndexer;
     private relationshipSearch: RelationshipSearch;
+    private lspProvider: LSPProvider;
     
     private lsifLoaded: boolean = false;
     private lsifCoverage: Set<string> = new Set(); // Files covered by LSIF
@@ -59,6 +61,10 @@ export class HybridKnowledgeBase {
     private hybridFeaturesAvailable: boolean = false;
 
     constructor(private db: Database, private extensionPath?: string) {
+        // Initialize LSP Provider (always available - uses VS Code's language servers)
+        this.lspProvider = new LSPProvider();
+        console.log('✅ LSP Provider initialized (using VS Code language servers)');
+        
         // Initialize optional features if available
         if (LSIFManager) {
             try {
@@ -614,6 +620,82 @@ export class HybridKnowledgeBase {
     clearCaches(): void {
         this.treeSitterManager.clearCache();
         this.treeSitterCache.clear();
+        this.lspProvider.clearCache();
+    }
+
+    // ========================================
+    // LSP Integration Methods
+    // ========================================
+
+    /**
+     * Get symbol information using LSP for a file
+     */
+    async getLSPSymbols(fileUri: vscode.Uri) {
+        return this.lspProvider.getDocumentSymbols(fileUri);
+    }
+
+    /**
+     * Search workspace symbols using LSP
+     */
+    async searchLSPSymbols(query: string, kinds?: vscode.SymbolKind[]) {
+        return this.lspProvider.searchSymbols(query, kinds);
+    }
+
+    /**
+     * Get definition of symbol at position using LSP
+     */
+    async getLSPDefinition(uri: vscode.Uri, position: vscode.Position) {
+        return this.lspProvider.getDefinition(uri, position);
+    }
+
+    /**
+     * Get all references to symbol at position using LSP
+     */
+    async getLSPReferences(uri: vscode.Uri, position: vscode.Position, includeDeclaration = true) {
+        return this.lspProvider.getReferences(uri, position, includeDeclaration);
+    }
+
+    /**
+     * Get call hierarchy (callers and callees) using LSP
+     */
+    async getLSPCallHierarchy(uri: vscode.Uri, position: vscode.Position) {
+        return this.lspProvider.getCallHierarchy(uri, position);
+    }
+
+    /**
+     * Index workspace using LSP (leverages VS Code's language servers)
+     */
+    async indexWorkspaceWithLSP(workspaceFolder: vscode.WorkspaceFolder) {
+        console.log('🔍 Indexing workspace with LSP (using VS Code language servers)...');
+        await this.lspProvider.indexWorkspace(workspaceFolder);
+    }
+
+    /**
+     * Find all classes in workspace using LSP
+     */
+    async findClassesViaLSP() {
+        return this.lspProvider.findClasses();
+    }
+
+    /**
+     * Find all interfaces in workspace using LSP
+     */
+    async findInterfacesViaLSP() {
+        return this.lspProvider.findInterfaces();
+    }
+
+    /**
+     * Find all methods in workspace using LSP
+     */
+    async findMethodsViaLSP() {
+        return this.lspProvider.findMethods();
+    }
+
+    /**
+     * Get hover information (type, documentation) using LSP
+     */
+    async getLSPHover(uri: vscode.Uri, position: vscode.Position) {
+        return this.lspProvider.getHover(uri, position);
     }
 
     /**

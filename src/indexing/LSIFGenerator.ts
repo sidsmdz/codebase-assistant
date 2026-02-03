@@ -70,6 +70,15 @@ export class LSIFGenerator {
     }
 
     /**
+     * Get the path to a bundled LSIF tool
+     */
+    private getToolPath(toolName: string): string {
+        // Look for tool in node_modules/.bin
+        const extensionPath = vscode.extensions.getExtension('your-company.autoforge')?.extensionPath || '';
+        return path.join(extensionPath, 'node_modules', '.bin', toolName);
+    }
+
+    /**
      * Detect project type from workspace
      */
     async detectProjectType(workspaceFolder: vscode.WorkspaceFolder): Promise<ProjectType> {
@@ -118,6 +127,8 @@ export class LSIFGenerator {
             switch (projectType) {
                 case 'java-maven':
                 case 'java-gradle':
+                    // Java LSIF tools must be installed separately
+                    // Check global installation
                     try {
                         await execAsync('lsif-java --version');
                         return { installed: true, tool: 'lsif-java' };
@@ -125,12 +136,18 @@ export class LSIFGenerator {
                         return {
                             installed: false,
                             tool: 'lsif-java',
-                            installCommand: 'npm install -g @sourcegraph/lsif-java'
+                            installCommand: 'Follow instructions at: https://github.com/sourcegraph/lsif-java'
                         };
                     }
 
                 case 'typescript':
                 case 'javascript':
+                    // Check for bundled lsif-tsc first, then global
+                    const tsToolPath = this.getToolPath('lsif-tsc');
+                    if (fs.existsSync(tsToolPath)) {
+                        return { installed: true, tool: 'lsif-tsc' };
+                    }
+                    // Fallback to global installation check
                     try {
                         await execAsync('lsif-tsc --version');
                         return { installed: true, tool: 'lsif-tsc' };
@@ -138,7 +155,7 @@ export class LSIFGenerator {
                         return {
                             installed: false,
                             tool: 'lsif-tsc',
-                            installCommand: 'npm install -g lsif-tsc'
+                            installCommand: 'npm install -g lsif-tsc or @sourcegraph/lsif-tsc'
                         };
                     }
 
@@ -255,6 +272,7 @@ export class LSIFGenerator {
 
             switch (projectType) {
                 case 'java-maven':
+                    // For Java, use global installation (not bundled)
                     command = `cd "${rootPath}" && lsif-java index --output "${outputFile}"`;
                     break;
 
@@ -263,11 +281,12 @@ export class LSIFGenerator {
                     break;
 
                 case 'typescript':
-                    command = `cd "${rootPath}" && lsif-tsc -p tsconfig.json --out "${outputFile}"`;
-                    break;
-
                 case 'javascript':
-                    command = `cd "${rootPath}" && lsif-tsc --out "${outputFile}"`;
+                    // Try bundled tool first, fallback to global
+                    const tsToolPath = this.getToolPath('lsif-tsc');
+                    const toolCommand = fs.existsSync(tsToolPath) ? `"${tsToolPath}"` : 'lsif-tsc';
+                    const tsconfigFlag = projectType === 'typescript' ? '-p tsconfig.json ' : '';
+                    command = `cd "${rootPath}" && ${toolCommand} ${tsconfigFlag}--out "${outputFile}"`;
                     break;
 
                 default:
