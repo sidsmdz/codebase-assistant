@@ -146,54 +146,149 @@ Here's a real refactoring workflow that was tested and validated:
 
 ### Step 1: Check Impact
 
+**Command:**
 ```
-@workspace #autoforge_analyzeImpact refactor PermissionService
+@workspace #autoforge_analyzeImpact symbolName="PermissionService"
 ```
 
-**AI Response:**
-> "Risk score: 20 (LOW RISK). Found 8 methods, 3 fields, 0 references. Safe to proceed."
+**Expected AI Response:**
+> "Analyzing impact of PermissionService...
+> 
+> **Risk Assessment:**
+> - Risk Score: 20 (LOW RISK)
+> - Methods Found: 8 (createPermission, createRole, assignRoleToUser, removeRoleFromUser, getUserPermissions, userHasPermission, getUserRoles, addPermissionToRole)
+> - Fields Found: 3 (permissionRepository, roleRepository, userRoleRepository)
+> - References: 0 (fallback mode without Java LSP)
+> - Cross-Language Links: Likely has TypeScript counterpart
+> 
+> **Recommendation:** Safe to proceed with normal testing."
 
 ---
 
 ### Step 2: Request Refactoring
 
+**Command:**
 ```
-@workspace refactor PermissionService to use AuthorizationProvider pattern
+@workspace refactor PermissionService to use AuthorizationProvider pattern with dependency injection
 ```
 
-**What happens internally:**
-1. AI generates refactored Java code (not shown yet)
-2. AI automatically runs `#autoforge_verifyBridge`
-3. Verification detects: "Missing TypeScript interfaces"
+**Or use this more specific command:**
+```
+@workspace refactor the PermissionService class in test-fixtures/multi-module-enterprise/permissions/src/main/java/com/enterprise/permissions/service/PermissionService.java to use the AuthorizationProvider pattern with constructor-based dependency injection. Create the AuthorizationProvider interface and implement all 8 existing methods.
+```
+
+**What happens internally (you won't see this):**
+1. AI reads the current `PermissionService.java`
+2. AI generates refactored code with:
+   - New `AuthorizationProvider` interface
+   - Constructor-based dependency injection
+   - All 8 methods delegating to provider
+3. AI automatically runs `#autoforge_verifyBridge` (per PROHIBITION rule)
+4. Verification detects: "Missing TypeScript interface for PermissionService"
 
 ---
 
 ### Step 3: AI Auto-Corrects
 
-**AI Response:**
-> "I've detected missing TypeScript interfaces. Let me create them..."
+**AI Response (what you see):**
+> "I've analyzed the refactoring and detected missing TypeScript interfaces. Let me create them to maintain cross-language consistency...
+>
+> Creating: `test-fixtures/multi-module-enterprise/permissions/frontend/src/services/PermissionService.ts`"
 
-**AI generates:**
-- `PermissionService.ts` matching Java structure
-- All fields and methods aligned
+**AI generates TypeScript interface matching Java structure:**
+```typescript
+export interface PermissionService {
+  createPermission(name: string, description: string): Promise<Permission>;
+  createRole(name: string, permissions: string[]): Promise<Role>;
+  assignRoleToUser(userId: number, roleId: number): Promise<void>;
+  removeRoleFromUser(userId: number, roleId: number): Promise<void>;
+  getUserPermissions(userId: number): Promise<Permission[]>;
+  userHasPermission(userId: number, permissionName: string): Promise<boolean>;
+  getUserRoles(userId: number): Promise<Role[]>;
+  addPermissionToRole(roleId: number, permissionId: number): Promise<void>;
+}
+```
 
 ---
 
 ### Step 4: Re-Verification (Automatic)
 
-AI runs `#autoforge_verifyBridge` again:
+AI runs `#autoforge_verifyBridge` again internally:
 
 **Result:**
-> ✅ "All structures synchronized. Here's your validated code..."
+> ✅ "Verification PASSED: All cross-language structures synchronized"
 
 ---
 
 ### Step 5: See Final Code
 
-**Only now** does AI show you the code, with guarantee:
+**AI Response (final output):**
+> "Here's your validated refactored code:
+>
+> **Java Changes:**
+> - Extracted AuthorizationProvider interface
+> - Refactored PermissionService to use dependency injection
+> - All methods delegate to provider
+>
+> **TypeScript Changes:**
+> - Created matching PermissionService interface
+> - All method signatures aligned with Java
+>
+> ✅ **Validation Complete:** All structures verified and synchronized."
+
+**Guarantees:**
 - ✅ All cross-language structures validated
-- ✅ No breaking changes
+- ✅ No breaking changes to existing code
 - ✅ Type-safe across Java and TypeScript
+- ✅ All 8 methods preserved with correct signatures
+
+---
+
+## Step-by-Step Copy-Paste Example
+
+Want to try this right now? Here's the exact sequence:
+
+### 1. Open VS Code Chat
+
+Press `Ctrl+Alt+I` (or `Cmd+Option+I` on Mac)
+
+### 2. Run Impact Analysis
+
+Copy and paste this exact command:
+
+```
+@workspace #autoforge_analyzeImpact symbolName="PermissionService"
+```
+
+**Wait for response** showing risk score and structure analysis.
+
+### 3. Request Refactoring
+
+Copy and paste this:
+
+```
+@workspace refactor the PermissionService class in test-fixtures/multi-module-enterprise/permissions/src/main/java/com/enterprise/permissions/service/PermissionService.java to use the AuthorizationProvider pattern with constructor-based dependency injection. Create the AuthorizationProvider interface and implement all 8 existing methods.
+```
+
+### 4. Watch the Magic
+
+AI will:
+- ✅ Generate refactored Java code
+- ✅ Detect missing TypeScript interface
+- ✅ Auto-generate matching TypeScript code
+- ✅ Verify synchronization
+- ✅ Present validated code
+
+### 5. Review and Apply
+
+AI shows you the final code with validation checkmarks. You can now:
+- Review the changes
+- Copy the code to your files
+- Run tests to verify functionality
+
+**Time to complete:** ~30 seconds  
+**Your effort:** 2 copy-pastes  
+**Manual fixes needed:** 0
 
 ---
 
