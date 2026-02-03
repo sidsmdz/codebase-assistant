@@ -44,6 +44,10 @@
             "description": "Visualize architecture, features, and relationships"
           },
           {
+            "name": "context",
+            "description": "Show hybrid context analysis (Tree-sitter + LSP) for current code"
+          },
+          {
             "name": "session",
             "description": "Switch to or create a session with context restoration"
           },

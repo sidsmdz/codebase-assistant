@@ -3,6 +3,7 @@ package com.enterprise.onboarding.grpc;
 import com.enterprise.common.grpc.SecurityServiceGrpc;
 import com.enterprise.common.grpc.CheckAccessRequest;
 import com.enterprise.common.grpc.CheckAccessResponse;
+import com.enterprise.common.security.PermissionChecker;
 import com.enterprise.onboarding.model.OnboardingTask;
 import com.enterprise.onboarding.repository.OnboardingTaskRepository;
 import com.enterprise.onboarding.sdui.LayoutBuilder;
@@ -33,6 +34,9 @@ public class OnboardingGrpcService extends OnboardingServiceGrpc.OnboardingServi
     
     @Autowired
     private SecurityServiceGrpc.SecurityServiceBlockingStub securityService;
+    
+    @Autowired
+    private PermissionChecker permissionChecker;
     
     @Override
     public void getLayout(GetLayoutRequest request, StreamObserver<LayoutResponse> responseObserver) {
@@ -70,6 +74,20 @@ public class OnboardingGrpcService extends OnboardingServiceGrpc.OnboardingServi
     @Override
     public void getTaskList(GetTaskListRequest request, StreamObserver<TaskListResponse> responseObserver) {
         try {
+            // Check if user has permission to read tasks
+            CheckAccessResponse access = securityService.checkAccess(
+                CheckAccessRequest.newBuilder()
+                    .setUserId(request.getUserId())
+                    .setResource("onboarding.tasks")
+                    .setAction("read")
+                    .build()
+            );
+            
+            if (!access.getAllowed()) {
+                responseObserver.onError(new SecurityException("Access denied: " + access.getReason()));
+                return;
+            }
+            
             List<OnboardingTask> tasks = taskRepository.findByUserIdOrderBySequenceAsc(request.getUserId());
             
             List<com.enterprise.onboarding.grpc.OnboardingTask> protoTasks = tasks.stream()
@@ -101,6 +119,25 @@ public class OnboardingGrpcService extends OnboardingServiceGrpc.OnboardingServi
     @Override
     public void updateTaskStatus(UpdateTaskStatusRequest request, StreamObserver<UpdateTaskStatusResponse> responseObserver) {
         try {
+            // Check if user has permission to write tasks
+            CheckAccessResponse access = securityService.checkAccess(
+                CheckAccessRequest.newBuilder()
+                    .setUserId(request.getUserId())
+                    .setResource("onboarding.tasks")
+                    .setAction("write")
+                    .build()
+            );
+            
+            if (!access.getAllowed()) {
+                UpdateTaskStatusResponse response = UpdateTaskStatusResponse.newBuilder()
+                    .setSuccess(false)
+                    .setMessage("Access denied: " + access.getReason())
+                    .build();
+                responseObserver.onNext(response);
+                responseObserver.onCompleted();
+                return;
+            }
+            
             OnboardingTask task = taskRepository.findById(request.getTaskId())
                 .orElseThrow(() -> new IllegalArgumentException("Task not found"));
             
@@ -129,6 +166,25 @@ public class OnboardingGrpcService extends OnboardingServiceGrpc.OnboardingServi
     @Override
     public void getGridData(GetGridDataRequest request, StreamObserver<GridDataResponse> responseObserver) {
         try {
+            // Check if user has permission to read grid data
+            CheckAccessResponse access = securityService.checkAccess(
+                CheckAccessRequest.newBuilder()
+                    .setUserId(request.getUserId())
+                    .setResource("onboarding.grid")
+                    .setAction("read")
+                    .build()
+            );
+            
+            if (!access.getAllowed()) {
+                responseObserver.onError(new SecurityException("Access denied: " + access.getReason()));
+                return;
+            }
+            
+            // Check for sensitive data access
+            boolean canViewSensitive = permissionChecker.checkPermission(
+                request.getUserId(), "onboarding.grid", "view-sensitive"
+            );
+            
             OnboardingGridService.GridRequest gridRequest = new OnboardingGridService.GridRequest();
             gridRequest.setPage(request.getConfig().getPage());
             gridRequest.setPageSize(request.getConfig().getPageSize());
@@ -183,7 +239,7 @@ public class OnboardingGrpcService extends OnboardingServiceGrpc.OnboardingServi
                     .setType("string")
                     .setSortable(false)
                     .setSensitive(true)
-                    .setVisible(false)
+                    .setVisible(canViewSensitive)
                     .build()
             );
             
@@ -211,6 +267,25 @@ public class OnboardingGrpcService extends OnboardingServiceGrpc.OnboardingServi
     @Override
     public void processAction(ProcessActionRequest request, StreamObserver<ActionResponse> responseObserver) {
         try {
+            // Check basic permission for processing actions
+            CheckAccessResponse access = securityService.checkAccess(
+                CheckAccessRequest.newBuilder()
+                    .setUserId(request.getUserId())
+                    .setResource("onboarding.actions")
+                    .setAction("execute")
+                    .build()
+            );
+            
+            if (!access.getAllowed()) {
+                ActionResponse response = ActionResponse.newBuilder()
+                    .setSuccess(false)
+                    .setMessage("Access denied: " + access.getReason())
+                    .build();
+                responseObserver.onNext(response);
+                responseObserver.onCompleted();
+                return;
+            }
+            
             // Process different action types
             switch (request.getActionType()) {
                 case "completeTask":
@@ -237,6 +312,17 @@ public class OnboardingGrpcService extends OnboardingServiceGrpc.OnboardingServi
     }
     
     private void handleCompleteTask(ProcessActionRequest request, StreamObserver<ActionResponse> responseObserver) {
+        // Check if user has permission to complete tasks
+        if (!permissionChecker.checkPermission(request.getUserId(), "onboarding.tasks", "write")) {
+            ActionResponse response = ActionResponse.newBuilder()
+                .setSuccess(false)
+                .setMessage("Access denied: Cannot complete tasks")
+                .build();
+            responseObserver.onNext(response);
+            responseObserver.onCompleted();
+            return;
+        }
+        
         Long taskId = Long.parseLong(request.getPayloadOrDefault("taskId", "0"));
         
         OnboardingTask task = taskRepository.findById(taskId)
@@ -256,6 +342,17 @@ public class OnboardingGrpcService extends OnboardingServiceGrpc.OnboardingServi
     }
     
     private void handleUpdateGrid(ProcessActionRequest request, StreamObserver<ActionResponse> responseObserver) {
+        // Check if user has permission to update grid
+        if (!permissionChecker.checkPermission(request.getUserId(), "onboarding.grid", "write")) {
+            ActionResponse response = ActionResponse.newBuilder()
+                .setSuccess(false)
+                .setMessage("Access denied: Cannot update grid")
+                .build();
+            responseObserver.onNext(response);
+            responseObserver.onCompleted();
+            return;
+        }
+        
         ActionResponse response = ActionResponse.newBuilder()
             .setSuccess(true)
             .setMessage("Grid updated")
@@ -266,6 +363,17 @@ public class OnboardingGrpcService extends OnboardingServiceGrpc.OnboardingServi
     }
     
     private void handleExportData(ProcessActionRequest request, StreamObserver<ActionResponse> responseObserver) {
+        // Check if user has permission to export data
+        if (!permissionChecker.checkPermission(request.getUserId(), "onboarding.grid", "export")) {
+            ActionResponse response = ActionResponse.newBuilder()
+                .setSuccess(false)
+                .setMessage("Access denied: Cannot export data")
+                .build();
+            responseObserver.onNext(response);
+            responseObserver.onCompleted();
+            return;
+        }
+        
         ActionResponse response = ActionResponse.newBuilder()
             .setSuccess(true)
             .setMessage("Data exported")
