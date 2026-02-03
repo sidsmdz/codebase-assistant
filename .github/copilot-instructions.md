@@ -34,6 +34,28 @@ AutoForge provides three specialized tools that give you **structural awareness*
 - Visibility analysis (public/private/protected)
 - Concrete recommendation (SAFE / RISKY / REQUIRES_COORDINATION)
 
+**CRITICAL - TYPE-SAFE AI AGENT GUARANTEE:**
+
+> **You are PROHIBITED from showing refactored code to the user until BOTH of the following return SUCCESS:**
+> 1. `#autoforge_analyzeImpact` has been executed and reviewed
+> 2. `#autoforge_verifyBridge` has validated all cross-language structures
+>
+> This is not a suggestion—it is a **hard requirement** that ensures type safety across the codebase.
+> 
+> **Workflow:**
+> - Run `#autoforge_analyzeImpact symbolName="X"` → Review risk score
+> - Generate refactored code (internal, not shown to user)
+> - Run `#autoforge_verifyBridge proposedChanges="..."` → Validate structures
+> - If verification FAILS: Auto-fix the missing/mismatched parts
+> - Re-run `#autoforge_verifyBridge` until it returns SUCCESS
+> - ONLY THEN present the final code to the user
+>
+> **Why this matters:** Without this loop, you might generate Java code that breaks TypeScript clients, or vice versa. The verification step catches structural mismatches (missing fields, type incompatibilities) and provides specific diagnostic hints like:
+> - "Java method 'assignRoleToUser' takes 3 params, but TS service only has 2"
+> - "Missing field 'roleId' in TypeScript interface - add 'roleId: string;'"
+>
+> This makes you a **Type-Safe AI Agent** that can be trusted with enterprise refactoring.
+
 **Example:**
 ```
 User: "Can we rename the PermissionService class?"

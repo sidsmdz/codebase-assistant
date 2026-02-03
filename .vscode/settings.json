@@ -23,5 +23,14 @@
     "github.copilot.chat.agent.proxyExtensionTools": true,
     
     // Ensure workspace is trusted for tool execution
-    "security.workspace.trust.enabled": true
+    "security.workspace.trust.enabled": true,
+    
+    // ==================== Java LSP Configuration (Required for Impact Analysis) ====================
+    // IMPORTANT: Configure Java home to enable accurate reference detection
+    // Without this, analyzeImpact will show "0 references" (ghost low risk)
+    // Uncomment and set to your JDK path:
+    // "java.jdt.ls.java.home": "/usr/lib/jvm/java-17-openjdk-amd64",
+    // Or on macOS:
+    // "java.jdt.ls.java.home": "/Library/Java/JavaVirtualMachines/jdk-17.jdk/Contents/Home"
+    // Verify with: which java && java -version
 }
