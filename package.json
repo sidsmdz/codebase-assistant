@@ -28,7 +28,7 @@
         "name": "autoforge_analyzeImpact",
         "displayName": "Analyze Code Impact",
         "toolReferenceName": "autoforge_analyzeImpact",
-        "modelDescription": "Use this tool WHENEVER the user wants to modify, refactor, or delete a class, interface, function, or method. This tool finds all dependencies and potential breaking changes using Tree-sitter AST analysis and LSP cross-file references. Returns: symbol structure, all references, cross-language dependencies (Java↔TypeScript), risk score (0-100), and governance recommendation. Use BEFORE making changes to understand impact.",
+        "modelDescription": "Use this tool WHENEVER the user wants to modify, refactor, or delete a class, interface, function, or method. CRITICAL: Extract ONLY the exact class/function name from the user's request (e.g., 'refactor PermissionService' → symbolName: 'PermissionService', NOT 'refactor PermissionService'). This tool finds all dependencies and potential breaking changes using Tree-sitter AST analysis and LSP cross-file references. Returns: symbol structure, all references, cross-language dependencies (Java↔TypeScript), risk score (0-100), and governance recommendation. Use BEFORE making changes to understand impact.",
         "inputSchema": {
           "type": "object",
           "properties": {

@@ -286,20 +286,48 @@ export class FeatureGraphProvider {
 
         // Strategy 2: Search workspace files by name pattern
         console.log(`[AutoForge] LSP search failed, trying file search for: ${symbolName}`);
-        const javaFiles = await vscode.workspace.findFiles(`**/${symbolName}.java`, '**/node_modules/**', 10);
-        const tsFiles = await vscode.workspace.findFiles(`**/${symbolName}.ts`, '**/node_modules/**', 10);
-        const allFiles = [...javaFiles, ...tsFiles];
+        
+        // Try multiple patterns to be more robust
+        const patterns = [
+            `**/${symbolName}.java`,
+            `**/*/${symbolName}.java`,
+            `**/${symbolName}.ts`,
+            `**/*/${symbolName}.ts`,
+            `**/${symbolName}.tsx`,
+            `**/${symbolName}.jsx`
+        ];
+        
+        let allFiles: vscode.Uri[] = [];
+        for (const pattern of patterns) {
+            const files = await vscode.workspace.findFiles(pattern, '**/node_modules/**', 5);
+            allFiles.push(...files);
+            if (allFiles.length > 0) break; // Found some, no need to continue
+        }
 
         if (allFiles.length > 0) {
             const file = allFiles[0];
             const doc = await vscode.workspace.openTextDocument(file);
             
-            // Find class/interface declaration line
+            // Find class/interface/function declaration line
             const text = doc.getText();
-            const classMatch = text.match(new RegExp(`(class|interface)\\s+${symbolName}\\b`));
-            const line = classMatch ? doc.positionAt(text.indexOf(classMatch[0])).line : 0;
+            const patterns = [
+                new RegExp(`class\\s+${symbolName}\\b`, 'm'),
+                new RegExp(`interface\\s+${symbolName}\\b`, 'm'),
+                new RegExp(`function\\s+${symbolName}\\b`, 'm'),
+                new RegExp(`const\\s+${symbolName}\\s*=`, 'm'),
+                new RegExp(`export\\s+.*\\s+${symbolName}\\b`, 'm')
+            ];
+            
+            let line = 0;
+            for (const pattern of patterns) {
+                const match = text.match(pattern);
+                if (match) {
+                    line = doc.positionAt(text.indexOf(match[0])).line;
+                    break;
+                }
+            }
 
-            console.log(`[AutoForge] Found ${symbolName} via file search at: ${file.fsPath}`);
+            console.log(`[AutoForge] Found ${symbolName} via file search at: ${file.fsPath}:${line}`);
             
             return {
                 file: doc.uri.fsPath,

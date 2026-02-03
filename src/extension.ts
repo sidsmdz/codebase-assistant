@@ -53,9 +53,20 @@ export async function activate(context: vscode.ExtensionContext) {
     context.subscriptions.push(
         vscode.lm.registerTool('autoforge_analyzeImpact', {
             async invoke(options, token) {
-                const { symbolName } = options.input as { symbolName: string };
+                let { symbolName } = options.input as { symbolName: string };
                 
-                console.log(`[AutoForge Tool] analyzeImpact called for: ${symbolName}`);
+                // Defensive parsing: Extract just the class/function name
+                // Handle cases like "refactor PermissionService" or "the PermissionService class"
+                const words = symbolName.trim().split(/\s+/);
+                for (const word of words) {
+                    // Look for a word that starts with uppercase (likely a class name)
+                    if (/^[A-Z][a-zA-Z0-9_]*$/.test(word)) {
+                        symbolName = word;
+                        break;
+                    }
+                }
+                
+                console.log(`[AutoForge Tool] analyzeImpact called with raw: "${options.input}", parsed: "${symbolName}"`);
                 
                 try {
                     const impact = await featureGraphProvider.analyzeImpact(symbolName);
