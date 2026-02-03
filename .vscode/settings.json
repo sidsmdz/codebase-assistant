@@ -28,9 +28,16 @@
     // ==================== Java LSP Configuration (Required for Impact Analysis) ====================
     // IMPORTANT: Configure Java home to enable accurate reference detection
     // Without this, analyzeImpact will show "0 references" (ghost low risk)
-    // Uncomment and set to your JDK path:
-    // "java.jdt.ls.java.home": "/usr/lib/jvm/java-17-openjdk-amd64",
-    // Or on macOS:
-    // "java.jdt.ls.java.home": "/Library/Java/JavaVirtualMachines/jdk-17.jdk/Contents/Home"
-    // Verify with: which java && java -version
+    "java.jdt.ls.java.home": "\\\\wsl.localhost\\Ubuntu\\usr\\lib\\jvm\\java-21-openjdk-amd64",
+    "java.configuration.runtimes": [
+        {
+            "name": "JavaSE-21",
+            "path": "\\\\wsl.localhost\\Ubuntu\\usr\\lib\\jvm\\java-21-openjdk-amd64",
+            "default": true
+        }
+    ]
+    
+    // Examples for other platforms:
+    // Linux: "/usr/lib/jvm/java-17-openjdk-amd64"
+    // macOS: "/Library/Java/JavaVirtualMachines/jdk-17.jdk/Contents/Home"
 }
